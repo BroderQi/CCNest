@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+/artifacts/
+/.research/
+/.tools/
+/pkgs/
+TestResults/
+# Large third-party binary: fetched and hash-verified by scripts/fetch-mihomo.ps1
+/third_party/mihomo/mihomo.exe

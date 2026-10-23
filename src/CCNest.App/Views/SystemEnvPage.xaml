@@ -1,0 +1,117 @@
+<UserControl x:Class="CCNest.App.Views.SystemEnvPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:CCNest.App.ViewModels">
+    <ScrollViewer Style="{StaticResource PageScroll}">
+        <StackPanel MaxWidth="1000">
+            <TextBlock Style="{StaticResource PageTitle}" Text="{Binding Title}" />
+            <TextBlock Style="{StaticResource PageSubtitle}" Text="{Binding Subtitle}" />
+
+            <!-- Current -->
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:Button DockPanel.Dock="Right" Content="刷新" Icon="{ui:SymbolIcon ArrowSync24}" Command="{Binding RefreshCommand}" />
+                        <TextBlock Text="当前 Windows 设置" Style="{StaticResource CardTitle}" FontSize="16" />
+                    </DockPanel>
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="区域格式" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Current.Culture}" Style="{StaticResource Body}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Text="国家或地区" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Current.GeoName}" Style="{StaticResource Body}" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Text="首选语言" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding CurrentLanguagesText}" Style="{StaticResource Body}" Margin="0,3" />
+                        <TextBlock Grid.Row="3" Text="显示语言" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding UiLanguageText}" Style="{StaticResource Body}" Margin="0,3" />
+                        <TextBlock Grid.Row="4" Text="时区" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Current.TimeZoneDisplay}" Style="{StaticResource Body}" Margin="0,3" />
+                        <TextBlock Grid.Row="5" Text="系统区域设置" Style="{StaticResource Caption}" Margin="0,3" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Body}" Margin="0,3">
+                            <Run Text="{Binding Current.SystemLocale, Mode=OneWay}" /><Run Text="（CCNest 不修改系统区域设置）" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </TextBlock>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Selection -->
+            <TextBlock Text="选择要应用的设置" Style="{StaticResource SectionTitle}" />
+            <Border Style="{StaticResource Surface}" Padding="0">
+                <StackPanel>
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <CheckBox Content="区域格式（日期、时间、数字、货币格式）" IsChecked="{Binding RegionalFormat}" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" Margin="28,2,0,0" Text="通过 Set-Culture 修改；恢复时会还原你原有的自定义格式。" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:SystemEnvViewModel.Locales}" SelectedItem="{Binding RegionalLocale}" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="2" Text="新程序立即生效" Foreground="{StaticResource OkBrush}" FontSize="12" Margin="12,6,0,0" />
+                    </Grid>
+                    <Separator />
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <CheckBox Content="首选语言（把所选语言移到语言列表首位）" IsChecked="{Binding LanguageList}" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" Margin="28,2,0,0" Text="影响 Edge 及使用 Windows 语言列表的应用；原有语言与输入法保留，仅调整顺序（未安装时会添加）。" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:SystemEnvViewModel.Languages}" SelectedItem="{Binding PreferredLanguage}" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="2" Text="新程序立即生效" Foreground="{StaticResource OkBrush}" FontSize="12" Margin="12,6,0,0" />
+                    </Grid>
+                    <Separator />
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <CheckBox Content="时区" IsChecked="{Binding TimeZone}" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" Margin="28,2,0,0" Text="影响系统时钟显示和浏览器中的时区。若开启了“自动设置时区”，Windows 可能会自动改回。" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding TimeZones}" SelectedItem="{Binding SelectedTimeZone}" DisplayMemberPath="Display" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="2" Text="立即生效" Foreground="{StaticResource OkBrush}" FontSize="12" Margin="12,6,0,0" />
+                    </Grid>
+                    <Separator />
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <CheckBox Content="国家或地区（主位置）" IsChecked="{Binding HomeLocation}" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" Margin="28,2,0,0" Text="Windows 用于本地化内容（例如应用商店、新闻）的位置设置。" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:SystemEnvViewModel.Geos}" SelectedItem="{Binding SelectedGeo}" DisplayMemberPath="Name" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="2" Text="立即生效" Foreground="{StaticResource OkBrush}" FontSize="12" Margin="12,6,0,0" />
+                    </Grid>
+                    <Separator />
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <CheckBox Content="Windows 显示语言（使用上方所选语言）" IsChecked="{Binding DisplayLanguage}" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" Margin="28,2,0,0" Text="仅在已安装该语言包时可用，CCNest 不会下载安装语言包。应用和恢复都需要注销后才会生效。" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="需要注销" Foreground="{StaticResource WarnBrush}" FontSize="12" FontWeight="SemiBold" Margin="12,6,0,0" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <ui:ToggleSwitch IsChecked="{Binding ApplyWithSession}" Content="随 Claude 环境自动应用：激活时应用所选设置，结束会话时自动恢复" />
+                    <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0" Text="关闭时，可以用下方按钮单独应用，并在“恢复中心”或这里随时恢复。" />
+                    <WrapPanel Margin="0,14,0,0">
+                        <ui:Button Appearance="Primary" Content="预览并立即应用" Icon="{ui:SymbolIcon Checkmark24}" Command="{Binding ApplyNowCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="恢复原始设置" Icon="{ui:SymbolIcon ArrowUndo24}" Command="{Binding RestoreCommand}" Margin="0,0,8,8" />
+                        <TextBlock Text="{Binding PendingRestoreCount, StringFormat=有 {0} 项由 CCNest 应用的设置可恢复}" Style="{StaticResource Caption}" VerticalAlignment="Center"
+                                   Visibility="{Binding PendingRestoreCount, Converter={StaticResource CountToVisibility}}" />
+                    </WrapPanel>
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="16" Height="16" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding BusyText}" Style="{StaticResource Caption}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

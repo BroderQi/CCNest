@@ -1,0 +1,90 @@
+<UserControl x:Class="CCNest.App.Views.RestoreCenterPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:CCNest.App.ViewModels">
+    <UserControl.Resources>
+        <DataTemplate x:Key="ChangeRowTemplate" DataType="{x:Type vm:ChangeRow}">
+            <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+                <Grid Margin="18,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="200" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="130" />
+                    </Grid.ColumnDefinitions>
+                    <ui:SymbolIcon Symbol="{Binding State, Converter={StaticResource StatusToSymbol}}" Filled="True" FontSize="16" VerticalAlignment="Top" Margin="0,2,0,0"
+                                   Foreground="{Binding State, Converter={StaticResource StatusToBrush}}" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Timing}" Style="{StaticResource Caption}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="{Binding Describe}" Style="{StaticResource Body}" />
+                        <TextBlock Text="{Binding Error}" Style="{StaticResource Caption}" Foreground="{StaticResource WarnBrush}"
+                                   Visibility="{Binding Error, Converter={StaticResource NullToCollapsed}}" />
+                    </StackPanel>
+                    <Border Grid.Column="3" Style="{StaticResource Pill}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Background="{Binding State, Converter={StaticResource StatusToBrush}, ConverterParameter=soft}">
+                        <TextBlock Text="{Binding StateText}" FontSize="12" Foreground="{Binding State, Converter={StaticResource StatusToBrush}}" />
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+    <ScrollViewer Style="{StaticResource PageScroll}">
+        <StackPanel MaxWidth="1000">
+            <TextBlock Style="{StaticResource PageTitle}" Text="{Binding Title}" />
+            <TextBlock Style="{StaticResource PageSubtitle}" Text="{Binding Subtitle}" />
+
+            <ui:InfoBar IsOpen="{Binding HasOrphan}" IsClosable="False" Severity="Error" Title="上次会话未正常结束"
+                        Message="以下设置仍处于激活状态。恢复会撤销它们（网络阻断规则需要管理员授权）。" Margin="0,0,0,8" />
+
+            <DockPanel Margin="0,4,0,8">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <ui:Button Content="刷新" Icon="{ui:SymbolIcon ArrowSync24}" Command="{Binding RefreshCommand}" Margin="0,0,8,0" />
+                    <ui:Button Appearance="Primary" Content="恢复上次会话的更改" Icon="{ui:SymbolIcon ArrowUndo24}" Command="{Binding RestoreOrphanCommand}"
+                               Visibility="{Binding HasOrphan, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="会话更改" Style="{StaticResource SectionTitle}" Margin="0" />
+                    <TextBlock Text="{Binding SessionText}" Style="{StaticResource Caption}" />
+                </StackPanel>
+            </DockPanel>
+            <Border Style="{StaticResource Surface}" Padding="0" Visibility="{Binding SessionChanges.Count, Converter={StaticResource CountToVisibility}}">
+                <ItemsControl ItemsSource="{Binding SessionChanges}" ItemTemplate="{StaticResource ChangeRowTemplate}" />
+            </Border>
+
+            <DockPanel Margin="0,12,0,8">
+                <ui:Button DockPanel.Dock="Right" Content="恢复全部独立修改" Icon="{ui:SymbolIcon ArrowUndo24}" Command="{Binding RestoreStandaloneCommand}" />
+                <StackPanel>
+                    <TextBlock Text="独立修改（系统环境、修复操作）" Style="{StaticResource SectionTitle}" Margin="0" />
+                    <TextBlock Text="不随会话结束自动恢复，需要时在这里恢复。" Style="{StaticResource Caption}" />
+                </StackPanel>
+            </DockPanel>
+            <Border Style="{StaticResource Surface}" Padding="0" Visibility="{Binding StandaloneChanges.Count, Converter={StaticResource CountToVisibility}}">
+                <ItemsControl ItemsSource="{Binding StandaloneChanges}" ItemTemplate="{StaticResource ChangeRowTemplate}" />
+            </Border>
+            <TextBlock Text="暂无独立修改。" Style="{StaticResource Caption}" Margin="0,0,0,8"
+                       Visibility="{Binding StandaloneChanges.Count, Converter={StaticResource CountToVisibility}, ConverterParameter=invert}" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVisibility}}">
+                <ui:Button Content="强制恢复被修改的项目…" Icon="{ui:SymbolIcon Warning24}" Appearance="Caution" Command="{Binding ForceRestoreCommand}" />
+            </StackPanel>
+
+            <TextBlock Text="历史会话" Style="{StaticResource SectionTitle}" />
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <ItemsControl ItemsSource="{Binding History}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Style="{StaticResource Body}" Margin="0,3" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ui:HyperlinkButton Content="打开状态文件夹" Command="{Binding OpenStateFolderCommand}" Padding="0,6" Margin="0,6,0,0" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

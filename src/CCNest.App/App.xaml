@@ -1,0 +1,33 @@
+<Application x:Class="CCNest.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:conv="clr-namespace:CCNest.App.Converters"
+             xmlns:proxy="clr-namespace:CCNest.Core.Proxy;assembly=CCNest.Core"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+                <ResourceDictionary Source="Themes/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+            <conv:BoolToVisibilityConverter x:Key="InverseBoolToVisibility" Invert="True" />
+            <conv:NullToVisibilityConverter x:Key="NullToCollapsed" />
+            <conv:NullToVisibilityConverter x:Key="NotNullToCollapsed" Invert="True" />
+            <conv:InverseBoolConverter x:Key="InverseBool" />
+            <conv:StatusToBrushConverter x:Key="StatusToBrush" />
+            <conv:StatusToSymbolConverter x:Key="StatusToSymbol" />
+            <conv:EnumEqualsConverter x:Key="EnumEquals" />
+            <conv:EnumToVisibilityConverter x:Key="EnumToVisibility" />
+            <conv:CountToVisibilityConverter x:Key="CountToVisibility" />
+            <conv:StringEmptyToVisibilityConverter x:Key="EmptyToCollapsed" />
+            <conv:ProtocolNameConverter x:Key="ProtocolName" />
+            <DataTemplate DataType="{x:Type proxy:ProxyProtocol}">
+                <TextBlock Text="{Binding Converter={StaticResource ProtocolName}}" />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

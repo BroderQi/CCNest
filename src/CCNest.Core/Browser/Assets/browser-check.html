@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCNest 浏览器环境检测</title>
+<style>
+  :root { color-scheme: light dark; --accent: #c96442; }
+  body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; margin: 0; background: Canvas; color: CanvasText; }
+  main { max-width: 760px; margin: 48px auto; padding: 0 24px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  p.sub { opacity: .7; margin: 0 0 28px; }
+  .card { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 10px; padding: 18px 20px; margin-bottom: 14px; }
+  .row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, CanvasText 10%, transparent); }
+  .row:last-child { border-bottom: 0; }
+  .k { opacity: .7; white-space: nowrap; }
+  .v { text-align: right; word-break: break-all; font-family: Consolas, monospace; font-size: 13px; }
+  .status { font-weight: 600; color: var(--accent); }
+  .done { color: #2e7d32; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CCNest 浏览器环境检测</h1>
+  <p class="sub">本页面由 CCNest 在本机提供，仅读取浏览器公开的环境信息并回传给 CCNest，不会上传到任何第三方。</p>
+  <div class="card"><div class="row"><span class="k">状态</span><span class="v status" id="status">正在检测…</span></div></div>
+  <div class="card" id="out"></div>
+</main>
+<script>
+(async () => {
+  const token = "__TOKEN__";
+  const out = document.getElementById("out");
+  const show = (k, v) => { const r = document.createElement("div"); r.className = "row"; r.innerHTML = `<span class="k"></span><span class="v"></span>`; r.children[0].textContent = k; r.children[1].textContent = v; out.appendChild(r); };
+  const result = { errors: [] };
+  try {
+    const ro = Intl.DateTimeFormat().resolvedOptions();
+    result.languages = Array.from(navigator.languages || []);
+    result.language = navigator.language;
+    result.timeZone = ro.timeZone;
+    result.locale = ro.locale;
+    result.tzOffsetMinutes = -new Date().getTimezoneOffset();
+    result.userAgent = navigator.userAgent;
+    const uad = navigator.userAgentData;
+    result.brands = uad && uad.brands ? uad.brands.map(b => b.brand + " " + b.version).join(" / ") : null;
+    result.platform = uad ? uad.platform : navigator.platform;
+  } catch (e) { result.errors.push("basic: " + e); }
+
+  try {
+    const r = await fetch("https://api.ipify.org?format=json", { cache: "no-store" });
+    result.browserExitIp = (await r.json()).ip;
+  } catch (e) { result.errors.push("exit-ip: " + e); }
+
+  result.webrtcCandidates = [];
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }] });
+    pc.createDataChannel("ccnest");
+    pc.onicecandidate = (ev) => { if (ev.candidate && ev.candidate.candidate) result.webrtcCandidates.push(ev.candidate.candidate); };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise(res => setTimeout(res, 5000));
+    pc.close();
+  } catch (e) { result.errors.push("webrtc: " + e); }
+
+  show("浏览器语言", (result.languages || []).join(", "));
+  show("时区", result.timeZone + "（UTC" + (result.tzOffsetMinutes >= 0 ? "+" : "") + (result.tzOffsetMinutes / 60) + "）");
+  show("区域格式", result.locale);
+  show("浏览器出口 IP", result.browserExitIp || "获取失败");
+  show("WebRTC 候选数量", String(result.webrtcCandidates.length));
+
+  try {
+    await fetch("/" + token + "/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) });
+    const s = document.getElementById("status"); s.textContent = "检测完成，结果已回传 CCNest，可以关闭此页面"; s.classList.add("done");
+  } catch (e) {
+    document.getElementById("status").textContent = "无法回传结果：" + e;
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows7.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>CCNest</AssemblyName>
+    <RootNamespace>CCNest.App</RootNamespace>
+    <ApplicationIcon>Assets\ccnest.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <StartupObject>CCNest.App.Program</StartupObject>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <Description>CCNest — Claude environment manager for Windows</Description>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <!-- WinForms is only used for the tray icon; keep its namespaces out of the global usings. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CCNest.Core\CCNest.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\ccnest.ico" />
+    <Resource Include="Assets\ccnest-256.png" />
+    <Resource Include="Assets\ccnest-64.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+  </ItemGroup>
+
+  <!-- Ship the pinned mihomo core next to the app (core\mihomo.exe) together with its license. -->
+  <ItemGroup>
+    <None Include="..\..\third_party\mihomo\mihomo.exe" Link="core\mihomo.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\third_party\mihomo\mihomo.exe')" />
+    <None Include="..\..\third_party\mihomo\LICENSE" Link="core\LICENSE-mihomo.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\third_party\mihomo\LICENSE')" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\THIRD-PARTY-NOTICES.md')" />
+  </ItemGroup>
+</Project>

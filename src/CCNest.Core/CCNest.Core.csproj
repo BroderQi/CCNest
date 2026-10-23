@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows7.0</TargetFramework>
+    <RootNamespace>CCNest.Core</RootNamespace>
+    <AssemblyName>CCNest.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CCNest.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Browser\Assets\browser-check.html" LogicalName="CCNest.BrowserCheck.html" />
+  </ItemGroup>
+</Project>

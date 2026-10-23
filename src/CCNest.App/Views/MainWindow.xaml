@@ -1,0 +1,92 @@
+<ui:FluentWindow x:Class="CCNest.App.Views.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:vm="clr-namespace:CCNest.App.ViewModels"
+                 xmlns:views="clr-namespace:CCNest.App.Views"
+                 Title="CCNest"
+                 Width="1180" Height="780" MinWidth="980" MinHeight="640"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 WindowCornerPreference="Round"
+                 Icon="pack://application:,,,/Assets/ccnest.ico"
+                 FontFamily="{StaticResource UiFont}">
+    <ui:FluentWindow.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}"><views:DashboardPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:NetworkViewModel}"><views:NetworkPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DiagnosticsViewModel}"><views:DiagnosticsPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ClaudeAppsViewModel}"><views:ClaudeAppsPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:BrowserViewModel}"><views:BrowserPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SystemEnvViewModel}"><views:SystemEnvPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:RestoreCenterViewModel}"><views:RestoreCenterPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:LogsViewModel}"><views:LogsPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><views:SettingsPage /></DataTemplate>
+
+        <DataTemplate x:Key="NavItemTemplate" DataType="{x:Type vm:PageViewModel}">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="{Binding Icon}" FontSize="18" Margin="0,0,12,0" />
+                <TextBlock Text="{Binding Title}" FontSize="14" VerticalAlignment="Center" />
+            </StackPanel>
+        </DataTemplate>
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="CCNest · Claude 环境管家" CloseWindowByDoubleClickOnIcon="False">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/ccnest-64.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="232" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Navigation pane -->
+            <Grid Grid.Column="0" Margin="12,4,8,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Compact status -->
+                <Border Grid.Row="0" CornerRadius="8" Padding="12,10" Margin="0,0,0,12"
+                        Background="{Binding Status.State, Converter={StaticResource StatusToBrush}, ConverterParameter=soft}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="{Binding Status.State, Converter={StaticResource StatusToSymbol}}" FontSize="18"
+                                           Foreground="{Binding Status.State, Converter={StaticResource StatusToBrush}}" Margin="0,0,8,0" Filled="True" />
+                            <TextBlock Text="{Binding Status.Headline}" FontWeight="SemiBold" FontSize="14"
+                                       Foreground="{Binding Status.State, Converter={StaticResource StatusToBrush}}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Margin="26,4,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="{Binding Status.ExitIp, StringFormat=出口 {0}}" Visibility="{Binding Status.ExitIp, Converter={StaticResource NullToCollapsed}}" />
+                    </StackPanel>
+                </Border>
+
+                <ListBox Grid.Row="1" Style="{StaticResource NavList}" ItemContainerStyle="{StaticResource NavItem}"
+                         ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" ItemTemplate="{StaticResource NavItemTemplate}" />
+
+                <ListBox Grid.Row="2" Style="{StaticResource NavList}" ItemContainerStyle="{StaticResource NavItem}"
+                         ItemsSource="{Binding FooterPages}" SelectedItem="{Binding SelectedFooterPage}" ItemTemplate="{StaticResource NavItemTemplate}" />
+            </Grid>
+
+            <!-- Page host -->
+            <Border Grid.Column="1" Background="{DynamicResource LayerFillColorDefaultBrush}"
+                    CornerRadius="8,0,0,0" BorderThickness="1,1,0,0" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                <ContentControl Content="{Binding CurrentPage}" Focusable="False" />
+            </Border>
+        </Grid>
+
+        <ui:ContentDialogHost x:Name="DialogHost" Grid.Row="0" Grid.RowSpan="2" />
+        <ui:SnackbarPresenter x:Name="SnackbarPresenter" Grid.Row="1" VerticalAlignment="Bottom" Margin="240,0,24,24" />
+    </Grid>
+</ui:FluentWindow>

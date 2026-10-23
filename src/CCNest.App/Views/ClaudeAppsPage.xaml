@@ -1,0 +1,76 @@
+<UserControl x:Class="CCNest.App.Views.ClaudeAppsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <ScrollViewer Style="{StaticResource PageScroll}">
+        <StackPanel MaxWidth="1000">
+            <TextBlock Style="{StaticResource PageTitle}" Text="{Binding Title}" />
+            <TextBlock Style="{StaticResource PageSubtitle}" Text="{Binding Subtitle}" />
+
+            <!-- Claude Code -->
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:Button DockPanel.Dock="Right" Content="刷新" Icon="{ui:SymbolIcon ArrowSync24}" Command="{Binding RefreshCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Code24" FontSize="22" Margin="0,0,10,0" Foreground="{StaticResource BrandBrush}" />
+                            <StackPanel>
+                                <TextBlock Text="Claude Code（命令行）" Style="{StaticResource CardTitle}" FontSize="16" />
+                                <TextBlock Text="{Binding CodeStatus}" Style="{StaticResource Caption}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Body}" Margin="0,12,0,0" LineHeight="20"
+                               Text="Claude Code 读取 HTTPS_PROXY / HTTP_PROXY 环境变量（仅支持 HTTP 代理，不支持 SOCKS），也会读取 ~/.claude/settings.json 中 env 字段的同名设置——后者同样作用于 Claude Desktop 的 Code 标签页。" />
+                    <ui:ToggleSwitch Margin="0,12,0,0" IsChecked="{Binding ConfigureClaudeCode}"
+                                     Content="激活时在 ~/.claude/settings.json 中写入 CCNest 代理，结束时恢复原值（只修改 env 中的三个代理项，其他设置保持不变）" />
+                    <TextBlock Text="当前 settings.json 中的代理设置：" Style="{StaticResource Caption}" Margin="0,12,0,2" />
+                    <TextBlock Text="{Binding CodeProxyText}" Style="{StaticResource Mono}" />
+                    <WrapPanel Margin="0,12,0,0">
+                        <ui:Button Appearance="Primary" Content="打开 Claude Code 专属终端" Icon="{ui:SymbolIcon WindowConsole20}" Command="{Binding OpenTerminalCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="复制 PowerShell 启动命令" Icon="{ui:SymbolIcon Copy24}" Command="{Binding CopyEnvCommandCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="打开配置目录" Icon="{ui:SymbolIcon FolderOpen24}" Command="{Binding OpenSettingsFolderCommand}" Margin="0,0,8,8" />
+                    </WrapPanel>
+                    <ui:InfoBar IsOpen="True" IsClosable="False" Severity="Informational" Title="限制说明"
+                                Message="环境变量只在进程启动时读取：激活前已运行的 Claude Code 会话需要重新启动。Claude Code 启动的子进程（MCP 服务器、git、npm、curl 等）是否遵循代理取决于各自实现；需要强制覆盖它们时请使用“全局 TUN 模式”。" />
+                </StackPanel>
+            </Border>
+
+            <!-- Claude Desktop -->
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Bot24" FontSize="22" Margin="0,0,10,0" Foreground="{StaticResource BrandBrush}" />
+                        <StackPanel>
+                            <TextBlock Text="Claude Desktop" Style="{StaticResource CardTitle}" FontSize="16" />
+                            <TextBlock Text="{Binding DesktopStatus}" Style="{StaticResource Caption}" />
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Margin="0,12,0,0" LineHeight="20"
+                               Text="Claude Desktop 基于 Electron，其网络栈跟随 Windows 系统代理，也支持 --proxy-server 启动参数。CCNest 激活时会设置系统代理；通过下方按钮启动时还会附带启动参数。" />
+                    <ui:ToggleSwitch Margin="0,12,0,0" IsChecked="{Binding SetSystemProxy}"
+                                     Content="激活时把 Windows 系统代理指向 CCNest（同时影响普通浏览器等遵循系统代理的程序），结束时恢复" />
+                    <ui:ToggleSwitch Margin="0,8,0,0" IsChecked="{Binding SetUserEnv}"
+                                     Content="激活时设置用户级 HTTPS_PROXY 环境变量（影响所有新启动的程序，一般不需要）" />
+                    <WrapPanel Margin="0,12,0,0">
+                        <ui:Button Appearance="Primary" Content="通过 CCNest 启动 Claude Desktop" Icon="{ui:SymbolIcon Play24}" Command="{Binding LaunchDesktopCommand}" Margin="0,0,8,8" />
+                    </WrapPanel>
+                    <ui:InfoBar IsOpen="True" IsClosable="False" Severity="Informational" Title="限制说明"
+                                Message="若 Claude Desktop 已在运行，再次启动只会切换到现有窗口，启动参数不会生效；已建立的连接也不会自动切换线路。激活后请从托盘完全退出 Claude Desktop 再启动。Claude Desktop 中的云端功能（云端代码执行、Cowork 云端会话等）运行在 Anthropic 服务器上，其网络出口不受本机控制。" />
+                </StackPanel>
+            </Border>
+
+            <!-- Claude Web -->
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Globe24" FontSize="22" Margin="0,0,10,0" Foreground="{StaticResource BrandBrush}" />
+                        <TextBlock Text="Claude 网页版（claude.ai）" Style="{StaticResource CardTitle}" FontSize="16" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" LineHeight="20"
+                               Text="推荐使用“专属浏览器”访问 claude.ai：它固定通过 CCNest 端口联网（环境未激活时无法联网），登录状态长期保存且与日常浏览器隔离，并禁用了 WebRTC 的非代理 UDP。" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
