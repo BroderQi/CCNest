@@ -6,11 +6,12 @@
 dotnet test tests\CCNest.Tests\CCNest.Tests.csproj
 ```
 
-共 93 个测试（xUnit，约 35 秒）。测试通过模块初始化器隔离所有副作用：数据目录指向临时文件夹，系统代理使用内存假后端，
+当前共 126 个测试（xUnit，约 1 分钟）。测试通过模块初始化器隔离所有副作用：数据目录指向临时文件夹，系统代理使用内存假后端，
 Claude Code settings.json、用户环境变量与登录自启项都重定向到测试专用位置——**测试不会修改真实系统设置**。
 
 | 测试类 | 数量 | 覆盖内容 |
 | --- | --- | --- |
+| `EnvironmentConsistencyTests` / `IpIntelTests` | 19 | 全部一致 100 分；不一致逐项扣分和调整建议；缺少浏览器/IP 数据不显示满分；数据源国家/时区分歧待确认；Windows/IANA 时区及夏令时映射；空偏移不当作 UTC；中性语言不猜国家；IPQuery/IPLocate 字段解析、未知标记、评分及分类冲突 |
 | `MihomoChainIntegrationTests` | 8 | **真实 mihomo 内核** + 进程内假一级 / 二级代理：链路顺序（一级→二级）、二级宕机时不回退、二级密码错误时不回退、闸门关闭时业务流量被拒而探测端口仍可验证、一级探测端口、Claude 域名分流、经完整链路测速、内核崩溃后端口拒绝连接 |
 | `SessionLifecycleTests` | 4 | **真实 SessionManager + 真实 mihomo**：激活 → 验证出口 → 服务商更换 IP 时自动阻断 → 接受新 IP → 二级宕机进入“线路中断” → 正常结束并逐项恢复；期望 IP 不符时零修改中止；密码错误时给出准确原因；模拟崩溃后保持 fail-closed 状态，再由恢复流程全部还原 |
 | `HelperAndWatchdogTests` | 4 | 提权助手管道协议：只服务父进程（外部进程被拒绝）、拒绝未知命令、拒绝不安全的 TUN 配置、非管理员时 WFP 操作返回错误；守护进程三种情况（可用性优先自动恢复、安全优先保持阻断、正常退出不处理） |
@@ -20,9 +21,12 @@ Claude Code settings.json、用户环境变量与登录自启项都重定向到�
 | `ProxyTunnelTests` / `ProxyEndpointTests` / `EndpointHeuristicsTests` | 11 | HTTP CONNECT / SOCKS5 多跳隧道与逐级错误归因（连接失败 / 需要认证 / 认证失败 / 协议错误）、服务商代理串格式解析、粘性会话 / 地区池用户名推测 |
 | `MiscTests` | 8 | Cloudflare trace 解析、IP 比较、环回端口识别、WebRTC 候选分类、浏览器检测服务（页面令牌、Host 头校验、结果回传）、专属浏览器启动参数 |
 | `NativeLayoutTests` | 1 | WFP / WinINet 结构体布局与 SDK 头文件一致（期望值来自用 MSVC 编译的 sizeof/offsetof 探针） |
-| `LiveSystemSmokeTests` | 8 | **只读**调用真实 Windows API：WinINet 读取、TCP 监听表、网卡、防火墙 / BFE 状态、区域设置快照、Clash 检测、Claude 检测；非管理员无法添加 WFP 对象 |
+| `LiveSystemSmokeTests` | 9 | **只读**调用真实 Windows API：WinINet 读取、TCP 监听表、网卡、防火墙 / BFE 状态、区域设置快照、国家代码和当前显示语言、Clash 检测、Claude 检测；非管理员无法添加 WFP 对象 |
 
 ## 2. 本次开发环境中实际执行过的验证
+
+- 一致性评分改动：Release 构建 0 警告/0 错误；126 个测试全部通过、0 跳过，包含真实 mihomo 端到端测试。界面以隔离数据渲染“正常”“风险”“待检测”三种状态，核对得分、实际值与调整建议；未更改用户当前系统配置或代理会话。
+- 合并检测入口与质量查询：用隔离资料目录和本机假浏览器进程验证未激活/已阻断时跳过采样、受保护时回传样本、切换会话后丢弃样本；质量查询只用实测 IP，期望值不替代实测值，修改线路或迟到的旧配置结果不能恢复旧查询入口。通过假浏览器记录目标 URL 验证 Scamalytics 跳转，不访问用户浏览器资料。
 
 - 上述 93 个自动化测试全部通过（.NET 9.0.317）。
 - 在真实机器上只读检测成功：Clash Verge Rev（服务模式，`verge-mihomo.exe`）、混合端口 7897、**命名管道控制接口** `\\.\pipe\verge-mihomo`（mihomo v1.19.20）、策略组与节点测速、Claude Code 2.1.309（npm 安装）、Edge 浏览器、Defender 防火墙三个配置文件均关闭而 BFE 运行中。
@@ -56,7 +60,7 @@ Claude Code settings.json、用户环境变量与登录自启项都重定向到�
    - `%USERPROFILE%\.claude\settings.json` 的 `env` 中出现 `HTTPS_PROXY`，其他键不变
    - `curl -x http://127.0.0.1:17897 https://api.ipify.org` → 期望出口 IP
 4. 打开专属浏览器：访问 `https://www.cloudflare.com/cdn-cgi/trace`，`ip=` 为期望出口；关闭后再打开，登录状态仍在。
-5. 环境检测 → “检测专属浏览器环境”：WebRTC 一项应为“没有暴露任何公网 IP”。
+5. 环境检测 → “开始检测”：自动打开本机浏览器检测页并生成报告；WebRTC 一项应为“没有暴露任何公网 IP”。
 6. 结束并恢复：第 3 步的值全部恢复为基线；`HKCU\...\Run` 中没有 `CCNest.Recovery`；`%LOCALAPPDATA%\CCNest\state\session.json` 不存在。
 
 ### 4.2 故障与不回退

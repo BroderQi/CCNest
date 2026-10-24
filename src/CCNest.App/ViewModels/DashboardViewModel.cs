@@ -58,7 +58,7 @@ public sealed partial class DashboardViewModel : PageViewModel
     public string SinceText => Status.Since is { } s ? $"已运行 {(DateTime.Now - s):hh\\:mm\\:ss}" : "";
     public string LatencyText => Status.LatencyMs is { } l ? $"{l} ms" : "—";
     public string IntelText => Status.Intel is { } i
-        ? $"{i.CountryCode} {i.City} · {i.Org} · {IpIntel.Describe(i.Classification)}"
+        ? $"{i.CountryCode} {i.City} · {i.Org} · {(i.ClassificationDisagreement ? "网络类型存在来源分歧" : IpIntel.Describe(i.Classification))}"
         : Status.ExitCountry is { } c ? $"Claude 边缘节点显示地区：{c}" : "";
 
     public ObservableCollection<ActivationStep> Steps { get; } = new();

@@ -1,0 +1,37 @@
+<UserControl x:Class="CCNest.App.Views.GuidePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:CCNest.App.ViewModels"
+             x:Name="Root">
+    <ScrollViewer Style="{StaticResource PageScroll}">
+        <StackPanel MaxWidth="1000">
+            <TextBlock Text="{Binding Title}" Style="{StaticResource PageTitle}" />
+            <TextBlock Text="{Binding Subtitle}" Style="{StaticResource PageSubtitle}" />
+            <ItemsControl ItemsSource="{Binding Steps}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:GuideStep}">
+                        <Border Style="{StaticResource Surface}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="30" Height="30" CornerRadius="15" Background="{StaticResource BrandSoftBrush}" VerticalAlignment="Top">
+                                    <TextBlock Text="{Binding Number}" Foreground="{StaticResource BrandBrush}" FontWeight="SemiBold"
+                                               FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource CardTitle}" FontSize="16" Margin="0,3,0,8" />
+                                    <TextBlock Text="{Binding Body}" Style="{StaticResource Body}" LineHeight="22" />
+                                    <ui:Button Content="{Binding Action}" Icon="{ui:SymbolIcon ArrowRight24}" Margin="0,10,0,0"
+                                               Command="{Binding DataContext.GoCommand, ElementName=Root}" CommandParameter="{Binding PageKey}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -49,5 +49,11 @@ CCNest 随附或使用了以下第三方组件。各组件版权归其各自作�
 - 许可证：MIT，Copyright (c) 2026 yacuo / CheckCC
 - https://github.com/yacuo/check-cc
 - CCNest 参考了其浏览器环境检测的思路（语言、时区、区域格式等信号的采集方式），检测页面为独立实现。
-  CCNest 有意**没有**实现其中针对受限地区的“风险评分”及中文字体/国产设备识别，因为 CCNest 不提供、
-  也不协助任何规避地区资格或平台风控的功能。
+  CCNest 独立实现浏览器、Windows 与出口的一致性评分，不使用中文字体或设备品牌推断地区，
+  不将一致性分数解释为任何平台的账号风控判断。
+
+## 在线数据服务（不随应用分发数据库）
+
+- **IPQuery**：https://ipquery.io/ — 免 Key 的位置、网络与风险字段；官网允许用于商业应用。风险分数由该数据源提供，与 CCNest 一致性分数分开展示。
+- **IPLocate**：https://www.iplocate.io/docs — 免 Key 查询受每个来源 IP 每日额度限制；API 条款见 https://www.iplocate.io/legal/terms 。
+- 两家请求均明确指定被查询的出口 IP，服务方也会看到请求的网络来源。结果可能过时或存在分歧，CCNest 保留数据来源、未知状态与各自判断。

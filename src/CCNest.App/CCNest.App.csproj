@@ -45,5 +45,6 @@
     <None Include="..\..\third_party\mihomo\mihomo.exe" Link="core\mihomo.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\third_party\mihomo\mihomo.exe')" />
     <None Include="..\..\third_party\mihomo\LICENSE" Link="core\LICENSE-mihomo.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\third_party\mihomo\LICENSE')" />
     <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\THIRD-PARTY-NOTICES.md')" />
+    <None Include="..\..\docs\QUICKSTART.md" Link="使用说明.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -4,7 +4,7 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:vm="clr-namespace:CCNest.App.ViewModels"
                  xmlns:views="clr-namespace:CCNest.App.Views"
-                 Title="CCNest"
+                 Title="{Binding WindowTitle}"
                  Width="1180" Height="780" MinWidth="980" MinHeight="640"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
@@ -22,6 +22,7 @@
         <DataTemplate DataType="{x:Type vm:RestoreCenterViewModel}"><views:RestoreCenterPage /></DataTemplate>
         <DataTemplate DataType="{x:Type vm:LogsViewModel}"><views:LogsPage /></DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><views:SettingsPage /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:GuideViewModel}"><views:GuidePage /></DataTemplate>
 
         <DataTemplate x:Key="NavItemTemplate" DataType="{x:Type vm:PageViewModel}">
             <StackPanel Orientation="Horizontal">
@@ -37,10 +38,14 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="CCNest · Claude 环境管家" CloseWindowByDoubleClickOnIcon="False">
+        <ui:TitleBar Grid.Row="0" Title="{Binding WindowTitle}" CloseWindowByDoubleClickOnIcon="False">
             <ui:TitleBar.Icon>
                 <ui:ImageIcon Source="pack://application:,,,/Assets/ccnest-64.png" />
             </ui:TitleBar.Icon>
+            <ui:TitleBar.TrailingContent>
+                <ui:Button Content="使用文档" Icon="{ui:SymbolIcon BookOpen24}" Appearance="Transparent"
+                           Command="{Binding OpenGuideCommand}" Margin="0,0,12,0" VerticalAlignment="Center" />
+            </ui:TitleBar.TrailingContent>
         </ui:TitleBar>
 
         <Grid Grid.Row="1">

@@ -108,5 +108,8 @@ public class MiscTests
         var all = Core.Mihomo.ClaudeDomains.All(new[] { ".Example.COM ", "claude.ai" }).ToList();
         Assert.Contains("example.com", all);
         Assert.Equal(all.Count, all.Distinct().Count());
+        Assert.Contains("ipquery.io", all);
+        Assert.Contains("iplocate.io", all);
+        Assert.DoesNotContain("ipapi.is", all);
     }
 }

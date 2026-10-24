@@ -24,9 +24,16 @@ public sealed partial class NetworkViewModel : PageViewModel
         });
         services.Session.StatusChanged += _ => Ui(() =>
         {
+            if (SessionActive)
+            {
+                _testedQualityIp = null;
+                _testedRouteRevision = -1;
+            }
+            QualityStatus = null;
             OnPropertyChanged(nameof(SessionActive));
             OnPropertyChanged(nameof(TestActionText));
             OnPropertyChanged(nameof(TestDescription));
+            RefreshQualityState();
         });
     }
 
@@ -101,6 +108,66 @@ public sealed partial class NetworkViewModel : PageViewModel
     [ObservableProperty] private string? _intelSummary;
     [ObservableProperty] private bool _isDirty;
     [ObservableProperty] private string? _validationError;
+    [ObservableProperty] private string? _qualityStatus;
+    private int _routeRevision;
+    private int _testedRouteRevision = -1;
+    private string? _testedQualityIp;
+
+    public string? QualityExitIp
+    {
+        get
+        {
+            var ip = SessionActive
+                ? Services.Session.Status.State == SessionState.Protected && Services.Session.Status.GateOpen ? Services.Session.Status.ExitIp : null
+                : _testedRouteRevision == _routeRevision ? _testedQualityIp : null;
+            return System.Net.IPAddress.TryParse(ip, out var address)
+                ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString() : null;
+        }
+    }
+    public bool CanCheckExitQuality => QualityExitIp != null && !IsBusy;
+    public string QualityIpText => QualityExitIp is { } ip ? $"实测出口 IP：{ip}"
+        : "先测试当前线路，取得实测出口 IP 后再查看质量。";
+
+    private void RefreshQualityState()
+    {
+        OnPropertyChanged(nameof(QualityExitIp));
+        OnPropertyChanged(nameof(CanCheckExitQuality));
+        OnPropertyChanged(nameof(QualityIpText));
+        CheckExitQualityCommand.NotifyCanExecuteChanged();
+    }
+
+    private void InvalidateQualityRoute()
+    {
+        _routeRevision++;
+        _testedQualityIp = null;
+        _testedRouteRevision = -1;
+        QualityStatus = null;
+        RefreshQualityState();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCheckExitQuality))]
+    private void CheckExitQuality()
+    {
+        if (QualityExitIp is not { } ip) return;
+        var url = "https://scamalytics.com/ip/" + Uri.EscapeDataString(ip);
+        try
+        {
+            if (SessionActive)
+            {
+                if (Services.Session.MixedPort is not { } port) return;
+                var error = Core.Browser.DedicatedBrowser.Launch(Services.Settings.Current.Browser, port, url);
+                if (error != null)
+                {
+                    QualityStatus = "无法打开质量检测页面：" + error;
+                    return;
+                }
+            }
+            else
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            QualityStatus = $"已打开 {ip} 的 Scamalytics 页面，请在网页查看 Fraud Score。";
+        }
+        catch (Exception ex) { QualityStatus = "无法打开质量检测页面：" + ex.Message; }
+    }
 
     public bool SessionActive => Services.Session.HasSession;
     public string TestActionText => SessionActive ? "检测当前受保护线路" : "保存并逐级测试原始线路";
@@ -111,10 +178,16 @@ public sealed partial class NetworkViewModel : PageViewModel
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(IsBusy)) RefreshQualityState();
         if (e.PropertyName is nameof(IsDirty) or nameof(IsBusy) or nameof(BusyText) or nameof(TestResult) or nameof(TestSummary) or nameof(IntelSummary)
             or nameof(ValidationError) or nameof(Clash) or nameof(ClashSummary) or nameof(ClashFound) or nameof(PasteText) or nameof(ImportedNodeSummary)
             or nameof(SelectedConfigNode) or nameof(ImportYaml) or nameof(ManualText) or nameof(SessionActive) or nameof(TestActionText)
-            or nameof(TestDescription) or nameof(EndpointWarning)) return;
+            or nameof(TestDescription) or nameof(EndpointWarning) or nameof(QualityStatus) or nameof(QualityExitIp)
+            or nameof(CanCheckExitQuality) or nameof(QualityIpText)) return;
+        // A measured exit belongs to the route that was tested. Editing the expected IP alone
+        // doesn't change that route; changing any other configuration invalidates the old lookup.
+        if (e.PropertyName != nameof(ExpectedIp))
+            InvalidateQualityRoute();
         IsDirty = true;
     }
 
@@ -272,6 +345,7 @@ public sealed partial class NetworkViewModel : PageViewModel
                 FirstStageMode = FirstStageMode.ImportedNode, FirstStageNode = node,
                 SecondStage = new ProxyEndpoint { Host = "example.com", Port = 1 },
             });
+            InvalidateQualityRoute();
             SecretStore.Set(SecretStore.FirstStageNodeYaml, ImportYaml);
             Services.Settings.Update(s =>
             {
@@ -379,6 +453,10 @@ public sealed partial class NetworkViewModel : PageViewModel
     {
         TestSteps.Clear();
         TestResult = null;
+        _testedQualityIp = null;
+        _testedRouteRevision = -1;
+        QualityStatus = null;
+        RefreshQualityState();
         TestSummary = null;
         IntelSummary = null;
         ValidationError = null;
@@ -387,7 +465,8 @@ public sealed partial class NetworkViewModel : PageViewModel
         {
             // Test the running snapshot; unsaved or next-activation settings must not affect it.
             var activeProgress = new Progress<ChainStep>(step => { if (TestResult == null) TestSteps.Add(step); });
-            ShowTestResult(await Services.Session.TestCurrentRouteAsync(activeProgress));
+            var activeRevision = _routeRevision;
+            ShowTestResult(await Services.Session.TestCurrentRouteAsync(activeProgress), activeRevision);
             return;
         }
 
@@ -399,6 +478,8 @@ public sealed partial class NetworkViewModel : PageViewModel
         ValidationError = null;
         Services.Settings.Save(settings);
         IsDirty = false;
+
+        var testedRevision = _routeRevision;
 
         List<ProxyEndpoint>? first = settings.FirstStage.Mode switch
         {
@@ -428,7 +509,7 @@ public sealed partial class NetworkViewModel : PageViewModel
 
             var progress = new Progress<ChainStep>(step => { if (TestResult == null) TestSteps.Add(step); });
             var result = await ChainTester.RunAsync(first, SettingsStore.ResolveSecondStage(settings), settings.SecondStage.ExpectedExitIp, progress, lookupIntel: true);
-            ShowTestResult(result);
+            ShowTestResult(result, testedRevision);
             if (result.Passed && string.IsNullOrWhiteSpace(ExpectedIp) && result.ExitIp != null)
             {
                 var use = await Services.Dialogs.ConfirmAsync("设为期望出口 IP？",
@@ -446,9 +527,12 @@ public sealed partial class NetworkViewModel : PageViewModel
         }
     });
 
-    private void ShowTestResult(ChainTestResult result)
+    private void ShowTestResult(ChainTestResult result, int testedRevision)
     {
         TestResult = result;
+        _testedQualityIp = result.Mode == RouteTestMode.Original ? result.ExitIp : null;
+        _testedRouteRevision = testedRevision;
+        RefreshQualityState();
         // Reconcile asynchronous progress callbacks with the complete result before displaying it.
         TestSteps.Clear();
         foreach (var step in result.Steps)
@@ -463,6 +547,6 @@ public sealed partial class NetworkViewModel : PageViewModel
                 : $"{label}可用：一级出口 {result.FirstStageExitIp ?? "—"} → 二级出口 {result.ExitIp}，Claude 边缘看到 {result.ClaudeEdgeIp ?? "—"}（{result.ClaudeEdgeCountry ?? "—"}）"
             : $"{label}未通过：{result.FirstFailure?.Title} — {result.FirstFailure?.Detail}";
         if (result.Intel is { } intel)
-            IntelSummary = $"{intel.Ip} · {intel.CountryCode} {intel.Region} {intel.City} · {intel.Asn} {intel.Org} · 网络类型：{IpIntel.Describe(intel.Classification)}（数据库判断，仅供参考）";
+            IntelSummary = $"{intel.Ip} · {intel.CountryCode} {intel.Region} {intel.City} · {intel.Asn} {intel.Org} · 网络类型：{(intel.ClassificationDisagreement ? "来源分歧" : IpIntel.Describe(intel.Classification))}（数据库判断，仅供参考）";
     }
 }

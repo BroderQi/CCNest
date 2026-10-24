@@ -5,6 +5,7 @@ using CCNest.App.Services;
 using CCNest.Core.Browser;
 using CCNest.Core.Diagnostics;
 using CCNest.Core.Infrastructure;
+using CCNest.Core.Session;
 using Wpf.Ui.Controls;
 
 namespace CCNest.App.ViewModels;
@@ -27,9 +28,9 @@ public sealed partial class DiagnosticItemViewModel : ObservableObject
     {
         DiagStatus.Ok => "正常",
         DiagStatus.Info => "信息",
-        DiagStatus.Warning => "注意",
+        DiagStatus.Warning => Item.ConsistencyWeight.HasValue ? "风险" : "注意",
         DiagStatus.Error => "需处理",
-        _ => "无法确定",
+        _ => Item.ConsistencyWeight.HasValue ? "待检测" : "无法确定",
     };
 
     [ObservableProperty] private bool _isExpanded;
@@ -40,14 +41,13 @@ public sealed record DiagnosticGroup(string Name, ObservableCollection<Diagnosti
 
 public sealed partial class DiagnosticsViewModel : PageViewModel
 {
-    private BrowserCheckResult? _browserCheck;
     private DiagnosticReport? _report;
 
     public DiagnosticsViewModel(AppServices services) : base(services) { }
 
     public override string Key => "diagnostics";
     public override string Title => "环境检测";
-    public override string Subtitle => "检查网络出口、代理线路、DNS、IPv6、路由、Claude 应用与 Windows 环境，并修复可自动处理的问题。";
+    public override string Subtitle => "比较浏览器、Windows 与 IP 出口的一致性，逐项显示正常、风险和待检测，并检查网络线路。";
     public override SymbolRegular Icon => SymbolRegular.Stethoscope24;
 
     public ObservableCollection<DiagnosticGroup> Groups { get; } = new();
@@ -61,12 +61,22 @@ public sealed partial class DiagnosticsViewModel : PageViewModel
     [ObservableProperty] private bool _includeDnsLeak = true;
     [ObservableProperty] private bool _includeChain = true;
     [ObservableProperty] private string? _browserCheckStatus;
+    [ObservableProperty] private string _consistencyScore = "等待检测";
+    [ObservableProperty] private string _consistencySummary = "先激活环境，再点击“开始检测”，自动采集浏览器环境并获取完整评分。";
+    [ObservableProperty] private DiagStatus _consistencyStatus = DiagStatus.Unknown;
 
     [RelayCommand]
-    private Task RunAsync() => RunBusyAsync("正在检测…", async () =>
+    private Task RunAsync() => IsBusy ? Task.CompletedTask : RunBusyAsync("正在检测…", async () =>
     {
+        _report = null;
+        HasReport = false;
+        ConsistencyScore = "正在检测…";
+        ConsistencySummary = "正在比较实际环境，未检测的项目不会算作正常。";
+        ConsistencyStatus = DiagStatus.Unknown;
+        BrowserCheckStatus = null;
         Groups.Clear();
         ErrorCount = WarningCount = OkCount = RepairableCount = 0;
+        var browser = await CaptureBrowserAsync();
         var engine = new DiagnosticsEngine(Services.Settings, Services.Session);
         var progress = new Progress<DiagnosticItem>(item =>
         {
@@ -77,7 +87,7 @@ public sealed partial class DiagnosticsViewModel : PageViewModel
         {
             IncludeChainTest = IncludeChain,
             IncludeDnsLeakTest = IncludeDnsLeak,
-            BrowserCheck = _browserCheck,
+            BrowserCheck = browser,
         }, progress);
 
         // Re-render in the final, sorted order.
@@ -85,6 +95,12 @@ public sealed partial class DiagnosticsViewModel : PageViewModel
         ErrorCount = WarningCount = OkCount = RepairableCount = 0;
         foreach (var item in _report.Items) AddItem(item);
         LastRunText = $"{_report.StartedAt:HH:mm:ss} 完成，用时 {_report.Duration.TotalSeconds:F0} 秒";
+        if (_report.Consistency is { } assessment)
+        {
+            ConsistencyScore = assessment.ScoreText;
+            ConsistencySummary = assessment.Summary;
+            ConsistencyStatus = assessment.RiskCount > 0 ? DiagStatus.Warning : assessment.PendingCount > 0 ? DiagStatus.Unknown : DiagStatus.Ok;
+        }
         HasReport = true;
     });
 
@@ -124,34 +140,51 @@ public sealed partial class DiagnosticsViewModel : PageViewModel
         await RunAsync();
     }
 
-    [RelayCommand]
-    private async Task BrowserCheckAsync()
+    private async Task<BrowserCheckResult?> CaptureBrowserAsync()
     {
         if (Services.Session.MixedPort is not { } port || Services.Session.Journal == null)
         {
-            await Services.Dialogs.ShowMessageAsync("需要先激活环境", "浏览器环境检测会在专属浏览器中打开一个本机页面，需要先激活 Claude 环境。");
-            return;
+            BrowserCheckStatus = "尚未激活环境，本次继续检测本机与线路配置。激活后再点“开始检测”，即可自动采集专属浏览器环境。";
+            return null;
         }
-        await RunBusyAsync("正在专属浏览器中检测…", async () =>
+        if (Services.Session.Status.State != SessionState.Protected || !Services.Session.Status.GateOpen)
         {
+            BrowserCheckStatus = "当前环境未就绪或处于阻断状态，未打开浏览器检测页；请先在“概览”重新验证，再点“开始检测”。";
+            return null;
+        }
+        BusyText = "正在自动采集专属浏览器环境…";
+        try
+        {
+            var sessionId = Services.Session.Journal?.SessionId;
             await using var server = new BrowserCheckServer();
             var error = DedicatedBrowser.Launch(Services.Settings.Current.Browser, port, server.Url);
             if (error != null)
             {
-                Services.Dialogs.ShowErrorToast(error);
-                return;
+                BrowserCheckStatus = "浏览器检测未完成：" + error + "；其余检测继续进行。";
+                return null;
             }
             BrowserCheckStatus = "已在专属浏览器中打开检测页面，等待结果…";
             var result = await server.WaitAsync(TimeSpan.FromSeconds(90));
             if (result == null)
             {
-                BrowserCheckStatus = "等待超时：未收到检测页面的结果。";
-                return;
+                BrowserCheckStatus = "浏览器采样超时，其余检测继续进行。请确认浏览器能打开本机检测页，再点“开始检测”。";
+                return null;
             }
-            _browserCheck = result;
+            if (sessionId != Services.Session.Journal?.SessionId || port != Services.Session.MixedPort
+                || Services.Session.Status.State != SessionState.Protected || !Services.Session.Status.GateOpen)
+            {
+                BrowserCheckStatus = "检测期间环境状态已变化，浏览器采样已丢弃，请在环境稳定后重新检测。";
+                return null;
+            }
             BrowserCheckStatus = $"已收到浏览器结果（{DateTime.Now:HH:mm:ss}），已加入下方报告。";
-        });
-        await RunAsync();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Diagnostics", "浏览器采样失败：" + ex.Message);
+            BrowserCheckStatus = "浏览器检测未完成：" + ex.Message + "；其余检测继续进行。";
+            return null;
+        }
     }
 
     [RelayCommand]

@@ -47,9 +47,8 @@ public static class ClaudeDomains
         "ipify.org",
         "icanhazip.com",
         "cloudflare.com",
-        "ipapi.is",
-        "ipwho.is",
-        "ipinfo.io",
+        "ipquery.io",
+        "iplocate.io",
     };
 
     public static IEnumerable<string> All(IEnumerable<string>? extra = null) =>

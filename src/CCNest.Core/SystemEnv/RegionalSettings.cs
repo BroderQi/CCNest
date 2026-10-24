@@ -30,6 +30,7 @@ public sealed record RegionalSnapshot
 
 public sealed record RegionalStatus
 {
+    public string? CountryCode { get; init; }
     public string Culture { get; init; } = "";
     public int GeoId { get; init; }
     public string GeoName { get; init; } = "";
@@ -120,12 +121,13 @@ public static class RegionalSettings
 
         return new RegionalStatus
         {
+            CountryCode = GetGeoCountryCode(snap.GeoId),
             Culture = snap.Culture,
             GeoId = snap.GeoId,
             GeoName = geoName,
             LanguageTags = snap.Languages.Select(l => l.Tag).ToList(),
             UiLanguageOverride = snap.UiLanguageOverride,
-            CurrentUiLanguage = System.Globalization.CultureInfo.CurrentUICulture.Name,
+            CurrentUiLanguage = System.Globalization.CultureInfo.GetCultureInfo(GetUserDefaultUILanguage()).Name,
             InstalledUiLanguages = InstalledUiLanguages(),
             TimeZoneId = snap.TimeZoneId,
             TimeZoneDisplay = tzDisplay,
@@ -213,6 +215,12 @@ public static class RegionalSettings
     {
         var sb = new System.Text.StringBuilder(256);
         return GetGeoInfo(geoId, GEO_FRIENDLYNAME, sb, sb.Capacity, 0) > 0 ? sb.ToString() : geoId.ToString();
+    }
+
+    private static string? GetGeoCountryCode(int geoId)
+    {
+        var text = new System.Text.StringBuilder(8);
+        return GetGeoInfo(geoId, 4 /* GEO_ISO2 */, text, text.Capacity, 0) > 0 ? text.ToString() : null;
     }
 
     // ---- Preferred languages ------------------------------------------------------------
@@ -329,6 +337,9 @@ public static class RegionalSettings
 
     [DllImport("kernel32.dll")]
     private static extern int GetUserGeoID(int geoClass);
+
+    [DllImport("kernel32.dll")]
+    private static extern ushort GetUserDefaultUILanguage();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetUserGeoID(int geoId);

@@ -21,7 +21,7 @@
                                 <TextBlock Foreground="{StaticResource ErrorBrush}" Text="{Binding ErrorCount, StringFormat=需处理 {0}}" FontWeight="SemiBold" />
                             </Border>
                             <Border Style="{StaticResource Pill}" Background="{StaticResource WarnSoftBrush}" Margin="0,0,8,0">
-                                <TextBlock Foreground="{StaticResource WarnBrush}" Text="{Binding WarningCount, StringFormat=注意 {0}}" FontWeight="SemiBold" />
+                                <TextBlock Foreground="{StaticResource WarnBrush}" Text="{Binding WarningCount, StringFormat=风险 / 注意 {0}}" FontWeight="SemiBold" />
                             </Border>
                             <Border Style="{StaticResource Pill}" Background="{StaticResource OkSoftBrush}" Margin="0,0,8,0">
                                 <TextBlock Foreground="{StaticResource OkBrush}" Text="{Binding OkCount, StringFormat=正常 {0}}" FontWeight="SemiBold" />
@@ -41,14 +41,25 @@
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" VerticalAlignment="Top">
-                        <ui:Button Appearance="Primary" Content="开始检测" Icon="{ui:SymbolIcon Stethoscope24}" Command="{Binding RunCommand}" HorizontalAlignment="Stretch" />
-                        <ui:Button Content="检测专属浏览器环境" Icon="{ui:SymbolIcon Window24}" Command="{Binding BrowserCheckCommand}" Margin="0,8,0,0" HorizontalAlignment="Stretch" />
+                        <ui:Button Appearance="Primary" Content="开始检测" Icon="{ui:SymbolIcon Stethoscope24}" Command="{Binding RunCommand}" HorizontalAlignment="Stretch" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}" />
+                        <TextBlock Text="自动包含专属浏览器检测" Style="{StaticResource Caption}" Margin="0,6,0,0" />
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
                             <ui:Button Content="复制报告" Icon="{ui:SymbolIcon Copy24}" Command="{Binding CopyReportCommand}" Margin="0,0,8,0" />
                             <ui:Button Content="导出" Icon="{ui:SymbolIcon ArrowDownload24}" Command="{Binding ExportReportCommand}" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>
+            </Border>
+            <Border Style="{StaticResource Surface}">
+                <StackPanel>
+                    <TextBlock Text="环境一致性评分" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ConsistencyScore}" FontSize="30" FontWeight="Bold" Margin="0,8,0,4"
+                               Foreground="{Binding ConsistencyStatus, Converter={StaticResource StatusToBrush}}" />
+                    <TextBlock Text="{Binding ConsistencySummary}" Style="{StaticResource Body}"
+                               Foreground="{Binding ConsistencyStatus, Converter={StaticResource StatusToBrush}}" />
+                    <TextBlock Text="全部一致为 100 分；不一致逐项扣分；待检测项目暂不计分。该评分只衡量你的环境一致性，IP 数据源的风险分数另列。"
+                               Style="{StaticResource Caption}" Margin="0,8,0,0" />
+                </StackPanel>
             </Border>
             <TextBlock Text="{Binding BrowserCheckStatus}" Style="{StaticResource Caption}" Margin="0,0,0,8"
                        Visibility="{Binding BrowserCheckStatus, Converter={StaticResource NullToCollapsed}}" />
@@ -103,14 +114,16 @@
                                                                 </DataTemplate>
                                                             </ItemsControl.ItemTemplate>
                                                         </ItemsControl>
-                                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding ManualSteps, Converter={StaticResource NullToCollapsed}}">
+                                                        <Grid Margin="0,6,0,0" Visibility="{Binding ManualSteps, Converter={StaticResource NullToCollapsed}}">
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                                             <ui:SymbolIcon Symbol="Person24" FontSize="14" Margin="0,0,6,0" Foreground="{StaticResource WarnBrush}" />
-                                                            <TextBlock Text="{Binding ManualSteps, StringFormat=需要手动处理：{0}}" Style="{StaticResource Body}" Foreground="{StaticResource WarnBrush}" />
-                                                        </StackPanel>
-                                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding Uncertainty, Converter={StaticResource NullToCollapsed}}">
+                                                            <TextBlock Grid.Column="1" Text="{Binding ManualSteps, StringFormat=需要手动处理：{0}}" Style="{StaticResource Body}" Foreground="{StaticResource WarnBrush}" />
+                                                        </Grid>
+                                                        <Grid Margin="0,6,0,0" Visibility="{Binding Uncertainty, Converter={StaticResource NullToCollapsed}}">
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                                             <ui:SymbolIcon Symbol="QuestionCircle24" FontSize="14" Margin="0,0,6,0" Opacity="0.7" />
-                                                            <TextBlock Text="{Binding Uncertainty, StringFormat=不确定性：{0}}" Style="{StaticResource Caption}" />
-                                                        </StackPanel>
+                                                            <TextBlock Grid.Column="1" Text="{Binding Uncertainty, StringFormat=不确定性：{0}}" Style="{StaticResource Caption}" />
+                                                        </Grid>
                                                         <TextBlock Text="{Binding RepairResult}" Style="{StaticResource Body}" Foreground="{StaticResource OkBrush}" Margin="0,6,0,0"
                                                                    Visibility="{Binding RepairResult, Converter={StaticResource NullToCollapsed}}" />
                                                     </StackPanel>

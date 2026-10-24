@@ -22,7 +22,7 @@
 <body>
 <main>
   <h1>CCNest 浏览器环境检测</h1>
-  <p class="sub">本页面由 CCNest 在本机提供，仅读取浏览器公开的环境信息并回传给 CCNest，不会上传到任何第三方。</p>
+  <p class="sub">本页面由 CCNest 在本机提供，读取语言、时区和出口等信息并回传给 CCNest；出口和 WebRTC 检测会连接 ipify、Google / Cloudflare STUN。完成后可在 CCNest 查看一致性评分。</p>
   <div class="card"><div class="row"><span class="k">状态</span><span class="v status" id="status">正在检测…</span></div></div>
   <div class="card" id="out"></div>
 </main>
@@ -46,7 +46,7 @@
   } catch (e) { result.errors.push("basic: " + e); }
 
   try {
-    const r = await fetch("https://api.ipify.org?format=json", { cache: "no-store" });
+    const r = await fetch("https://api.ipify.org?format=json", { cache: "no-store", signal: AbortSignal.timeout(12000) });
     result.browserExitIp = (await r.json()).ip;
   } catch (e) { result.errors.push("exit-ip: " + e); }
 
@@ -67,7 +67,8 @@
   show("WebRTC 候选数量", String(result.webrtcCandidates.length));
 
   try {
-    await fetch("/" + token + "/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) });
+    const response = await fetch("/" + token + "/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) });
+    if (!response.ok) throw new Error("HTTP " + response.status);
     const s = document.getElementById("status"); s.textContent = "检测完成，结果已回传 CCNest，可以关闭此页面"; s.classList.add("done");
   } catch (e) {
     document.getElementById("status").textContent = "无法回传结果：" + e;

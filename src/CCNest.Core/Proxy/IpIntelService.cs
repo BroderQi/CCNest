@@ -15,7 +15,10 @@ public enum IpClass
 }
 
 public sealed record IpIntelSource(string Name, bool Ok, string? Error, string? CountryCode, string? City, string? Region,
-    string? Timezone, string? Asn, string? Org, string? Isp, string? Type, bool? IsProxy, bool? IsVpn, bool? IsDatacenter, bool? IsTor);
+    string? Timezone, string? Asn, string? Org, string? Isp, string? Type, bool? IsProxy, bool? IsVpn, bool? IsDatacenter, bool? IsTor)
+{
+    public int? RiskScore { get; init; }
+}
 
 public sealed record IpIntel(string Ip, IReadOnlyList<IpIntelSource> Sources)
 {
@@ -31,31 +34,28 @@ public sealed record IpIntel(string Ip, IReadOnlyList<IpIntelSource> Sources)
     /// <summary>Sources disagree on the country (common for freshly re-assigned or proxy IPs).</summary>
     public bool CountryDisagreement => Ok.Select(s => s.CountryCode?.ToUpperInvariant()).Where(c => c != null).Distinct().Count() > 1;
 
-    public IpClass Classification
+    public bool ClassificationDisagreement => Ok.Select(HostingFlag).Where(v => v.HasValue).Distinct().Count() > 1;
+    public IpClass Classification => ClassificationDisagreement ? IpClass.Unknown
+        : Ok.Any(s => HostingFlag(s) == true) ? IpClass.Datacenter
+        : Ok.Select(Classify).FirstOrDefault(c => c != IpClass.Unknown);
+
+    private static bool? HostingFlag(IpIntelSource s) => s.IsDatacenter == true || s.Type == "hosting" ? true : s.IsDatacenter;
+    private static IpClass Classify(IpIntelSource s) => s.Type?.ToLowerInvariant() switch
     {
-        get
-        {
-            var ipapi = Ok.FirstOrDefault(s => s.Name == "ipapi.is");
-            if (ipapi == null) return IpClass.Unknown;
-            if (ipapi.IsDatacenter == true) return IpClass.Datacenter;
-            return ipapi.Type?.ToLowerInvariant() switch
-            {
-                "hosting" => IpClass.Datacenter,
-                "isp" => IpClass.ResidentialOrIsp,
-                "business" => IpClass.Business,
-                "education" => IpClass.Education,
-                "government" => IpClass.Government,
-                "mobile" => IpClass.Mobile,
-                _ => IpClass.Unknown,
-            };
-        }
-    }
+        "hosting" => IpClass.Datacenter,
+        "isp" => IpClass.ResidentialOrIsp,
+        "business" => IpClass.Business,
+        "education" => IpClass.Education,
+        "government" => IpClass.Government,
+        "mobile" => IpClass.Mobile,
+        _ => IpClass.Unknown,
+    };
 
     public bool AnyProxyFlag => Ok.Any(s => s.IsProxy == true || s.IsVpn == true || s.IsTor == true);
 
     public static string Describe(IpClass c) => c switch
     {
-        IpClass.ResidentialOrIsp => "住宅 / ISP 网络",
+        IpClass.ResidentialOrIsp => "ISP 网络（未验证住宅）",
         IpClass.Datacenter => "数据中心 / 托管网络",
         IpClass.Business => "企业网络",
         IpClass.Mobile => "移动网络",
@@ -75,19 +75,37 @@ public sealed record IpIntel(string Ip, IReadOnlyList<IpIntelSource> Sources)
 /// </summary>
 public static class IpIntelService
 {
+    private sealed record CacheEntry(DateTimeOffset Expires, IpIntel Intel);
+    private static readonly Dictionary<string, CacheEntry> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly SemaphoreSlim QueryLock = new(1, 1);
+
     public static async Task<IpIntel> LookupAsync(string ip, IReadOnlyList<ProxyEndpoint> route, TimeSpan timeout, CancellationToken ct = default)
     {
-        using var client = ChainHttp.Create(route, timeout);
-        var tasks = new[]
+        if (!System.Net.IPAddress.TryParse(ip, out var address)) throw new ArgumentException("无效的 IP 地址", nameof(ip));
+        ip = address.MapToIPv6().ToString();
+        await QueryLock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            Query(client, "ipapi.is", $"https://api.ipapi.is/?q={Uri.EscapeDataString(ip)}", ParseIpapiIs, ct),
-            Query(client, "ipwho.is", $"https://ipwho.is/{Uri.EscapeDataString(ip)}", ParseIpwhoIs, ct),
-            Query(client, "ipinfo.io", $"https://ipinfo.io/{Uri.EscapeDataString(ip)}/json", ParseIpinfo, ct),
-        };
-        return new IpIntel(ip, await Task.WhenAll(tasks).ConfigureAwait(false));
+            if (Cache.TryGetValue(ip, out var cached) && cached.Expires > DateTimeOffset.UtcNow) return cached.Intel;
+            var queryIp = address.IsIPv4MappedToIPv6 ? address.MapToIPv4().ToString() : address.ToString();
+            using var client = ChainHttp.Create(route, timeout);
+            var tasks = new[]
+            {
+                Query(client, "IPQuery", $"https://api.ipquery.io/{Uri.EscapeDataString(queryIp)}", queryIp, ParseIpQuery, ct),
+                Query(client, "IPLocate", $"https://iplocate.io/api/lookup/{Uri.EscapeDataString(queryIp)}", queryIp, ParseIpLocate, ct),
+            };
+            var intel = new IpIntel(queryIp, await Task.WhenAll(tasks).ConfigureAwait(false));
+            // Daily keyless quotas are shared by clients using the same public exit. Repeated local
+            // diagnostics reuse data; failed/partial responses expire sooner, and retain null flags.
+            var lifetime = intel.Sources.All(s => s.Ok) ? TimeSpan.FromHours(12) : TimeSpan.FromMinutes(5);
+            if (Cache.Count >= 64) Cache.Remove(Cache.MinBy(p => p.Value.Expires).Key);
+            Cache[ip] = new CacheEntry(DateTimeOffset.UtcNow + lifetime, intel);
+            return intel;
+        }
+        finally { QueryLock.Release(); }
     }
 
-    private static async Task<IpIntelSource> Query(HttpClient client, string name, string url, Func<string, JsonElement, IpIntelSource> parse, CancellationToken ct)
+    private static async Task<IpIntelSource> Query(HttpClient client, string name, string url, string ip, Func<string, JsonElement, IpIntelSource> parse, CancellationToken ct)
     {
         try
         {
@@ -95,6 +113,7 @@ public static class IpIntelService
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return Failed(name, $"HTTP {(int)resp.StatusCode}");
             using var doc = JsonDocument.Parse(body);
+            if (!IpEchoService.SameIp(Str(doc.RootElement, "ip"), ip)) return Failed(name, "响应中的 IP 与查询目标不一致");
             return parse(name, doc.RootElement);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -107,43 +126,33 @@ public static class IpIntelService
     private static IpIntelSource Failed(string name, string error) =>
         new(name, false, error, null, null, null, null, null, null, null, null, null, null, null, null);
 
-    internal static IpIntelSource ParseIpapiIs(string name, JsonElement r)
+    internal static IpIntelSource ParseIpQuery(string name, JsonElement r)
     {
-        var loc = r.TryGetProperty("location", out var l) ? l : default;
-        var company = r.TryGetProperty("company", out var c) ? c : default;
-        var asn = r.TryGetProperty("asn", out var a) ? a : default;
+        var loc = Obj(r, "location");
+        var isp = Obj(r, "isp");
+        var risk = Obj(r, "risk");
+        if (loc.ValueKind != JsonValueKind.Object && risk.ValueKind != JsonValueKind.Object) return Failed(name, "响应缺少位置和分类数据");
         return new IpIntelSource(name, true, null,
             Str(loc, "country_code"), Str(loc, "city"), Str(loc, "state"), Str(loc, "timezone"),
-            asn.ValueKind == JsonValueKind.Object && asn.TryGetProperty("asn", out var n) ? "AS" + n.ToString() : null,
-            Str(asn, "org"), Str(company, "name"), Str(company, "type"),
-            Bool(r, "is_proxy"), Bool(r, "is_vpn"), Bool(r, "is_datacenter"), Bool(r, "is_tor"));
+            Str(isp, "asn"), Str(isp, "org"), Str(isp, "isp"), Bool(risk, "is_mobile") == true ? "mobile" : null,
+            Bool(risk, "is_proxy"), Bool(risk, "is_vpn"), Bool(risk, "is_datacenter"), Bool(risk, "is_tor"))
+        { RiskScore = risk.ValueKind == JsonValueKind.Object && risk.TryGetProperty("risk_score", out var score) && score.ValueKind == JsonValueKind.Number && score.TryGetInt32(out var n) && n is >= 0 and <= 100 ? n : null };
     }
 
-    internal static IpIntelSource ParseIpwhoIs(string name, JsonElement r)
+    internal static IpIntelSource ParseIpLocate(string name, JsonElement r)
     {
-        if (Bool(r, "success") == false) return Failed(name, Str(r, "message") ?? "查询失败");
-        var conn = r.TryGetProperty("connection", out var c) ? c : default;
-        var tz = r.TryGetProperty("timezone", out var t) ? t : default;
+        var asn = Obj(r, "asn");
+        var company = Obj(r, "company");
+        var privacy = Obj(r, "privacy");
+        if (Str(r, "country_code") == null && privacy.ValueKind != JsonValueKind.Object) return Failed(name, "响应缺少位置和分类数据");
         return new IpIntelSource(name, true, null,
-            Str(r, "country_code"), Str(r, "city"), Str(r, "region"), Str(tz, "id"),
-            conn.ValueKind == JsonValueKind.Object && conn.TryGetProperty("asn", out var n) ? "AS" + n.ToString() : null,
-            Str(conn, "org"), Str(conn, "isp"), null, null, null, null, null);
+            Str(r, "country_code"), Str(r, "city"), Str(r, "subdivision"), Str(r, "time_zone"),
+            Str(asn, "asn"), Str(company, "name") ?? Str(asn, "name"), Str(asn, "name"), Str(company, "type"),
+            Bool(privacy, "is_proxy"), Bool(privacy, "is_vpn"), Bool(privacy, "is_hosting"), Bool(privacy, "is_tor"));
     }
 
-    internal static IpIntelSource ParseIpinfo(string name, JsonElement r)
-    {
-        if (r.TryGetProperty("bogon", out var b) && b.ValueKind == JsonValueKind.True) return Failed(name, "保留地址");
-        var org = Str(r, "org");
-        string? asn = null, orgName = org;
-        if (org != null && org.StartsWith("AS", StringComparison.OrdinalIgnoreCase))
-        {
-            var space = org.IndexOf(' ');
-            asn = space > 0 ? org[..space] : org;
-            orgName = space > 0 ? org[(space + 1)..] : null;
-        }
-        return new IpIntelSource(name, true, null, Str(r, "country"), Str(r, "city"), Str(r, "region"), Str(r, "timezone"),
-            asn, orgName, null, null, null, null, null, null);
-    }
+    private static JsonElement Obj(JsonElement e, string prop) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(prop, out var v) ? v : default;
 
     private static string? Str(JsonElement e, string prop) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

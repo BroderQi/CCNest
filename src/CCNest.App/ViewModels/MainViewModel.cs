@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CCNest.App.Services;
+using CCNest.Core;
 using CCNest.Core.Browser;
 using CCNest.Core.Infrastructure;
 using CCNest.Core.Session;
@@ -29,7 +30,7 @@ public sealed partial class MainViewModel : ObservableObject
             new RestoreCenterViewModel(services),
             new LogsViewModel(services),
         };
-        FooterPages = new ObservableCollection<PageViewModel> { new SettingsViewModel(services) };
+        FooterPages = new ObservableCollection<PageViewModel> { new GuideViewModel(services), new SettingsViewModel(services) };
         _selectedPage = Dashboard;
         _status = services.Session.Status;
         services.Session.StatusChanged += s => Ui(() => Status = s);
@@ -37,6 +38,7 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     public DashboardViewModel Dashboard { get; }
+    public string WindowTitle => $"{AppInfo.DisplayName} · v{AppInfo.Version}";
     public ObservableCollection<PageViewModel> Pages { get; }
     public ObservableCollection<PageViewModel> FooterPages { get; }
 
@@ -71,6 +73,9 @@ public sealed partial class MainViewModel : ObservableObject
         if (page != null) SelectedPage = page;
         else if (FooterPages.FirstOrDefault(p => p.Key == key) is { } footer) SelectedFooterPage = footer;
     }
+
+    [RelayCommand]
+    private void OpenGuide() => Navigate("guide");
 
     public async Task InitializeAsync(string[] args)
     {

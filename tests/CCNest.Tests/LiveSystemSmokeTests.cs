@@ -53,6 +53,15 @@ public class LiveSystemSmokeTests
     }
 
     [Fact]
+    public async Task RegionalSettings_StatusReadsCountryCodeAndEffectiveDisplayLanguage()
+    {
+        var status = await RegionalSettings.ReadStatusAsync();
+        Assert.Matches("^[A-Z]{2}$", status.CountryCode ?? "");
+        Assert.False(string.IsNullOrWhiteSpace(status.CurrentUiLanguage));
+        Assert.False(string.IsNullOrWhiteSpace(status.TimeZoneId));
+    }
+
+    [Fact]
     public async Task ClashDetector_RunsWithoutThrowing()
     {
         var env = await ClashDetector.DetectAsync();

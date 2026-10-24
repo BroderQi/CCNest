@@ -23,8 +23,8 @@ public sealed record DiagnosticsOptions
 
 /// <summary>
 /// Runs all environment checks. Network checks run concurrently; every check is isolated so a failure
-/// in one never hides the others. Results are facts and actionable findings — CCNest deliberately does
-/// not produce speculative "account risk" scores.
+/// in one never hides the others. An explicit consistency score compares measured environment values;
+/// IP reputation and network classifications remain separate, attributed database findings.
 /// </summary>
 public sealed class DiagnosticsEngine
 {
@@ -76,7 +76,8 @@ public sealed class DiagnosticsEngine
 
         var clashTask = Guard("clash", DiagCategory.Proxy, "现有 Clash / Mihomo", () => CheckClashAsync(s, route, Add, ct));
         var claudeTask = Guard("claude", DiagCategory.Claude, "Claude 应用", () => CheckClaudeAppsAsync(Add, ct));
-        var regionalTask = Guard("regional", DiagCategory.System, "Windows 区域与语言", () => CheckRegionalAsync(s, Add, ct));
+        RegionalStatus? regional = null;
+        var regionalTask = Guard("regional", DiagCategory.System, "Windows 区域与语言", async () => regional = await CheckRegionalAsync(s, Add, ct).ConfigureAwait(false));
         var dnsTask = Guard("dns-system", DiagCategory.Dns, "系统 DNS", () => CheckSystemDnsAsync(Add));
         var directTask = options.IncludeDirectChecks ? Guard("direct", DiagCategory.Network, "本机直连出口", () => CheckDirectAsync(Add, ct)) : Task.CompletedTask;
         await Task.WhenAll(clashTask, claudeTask, regionalTask, dnsTask, directTask).ConfigureAwait(false);
@@ -90,15 +91,29 @@ public sealed class DiagnosticsEngine
 
         await Guard("clock", DiagCategory.System, "系统时间", () => CheckClockAsync(route, Add, ct)).ConfigureAwait(false);
 
-        if (options.BrowserCheck != null)
-            await Guard("browser-env", DiagCategory.Browser, "专属浏览器环境", () => { CheckBrowserEnvironment(s, options.BrowserCheck, chain, Add); return Task.CompletedTask; }).ConfigureAwait(false);
+        var browser = options.BrowserCheck;
+        if (browser != null && (browser.CapturedAt > DateTimeOffset.UtcNow || DateTimeOffset.UtcNow - browser.CapturedAt > TimeSpan.FromMinutes(10)))
+            browser = null;
+        if (!IsRouteCurrent(route) || route.Protected && (_session!.Status.State != SessionState.Protected || !_session.Status.GateOpen))
+        {
+            // A report cannot combine the former route with settings restored by deactivation.
+            chain = null;
+            browser = null;
+            regional = null;
+        }
+        if (browser != null)
+            await Guard("browser-env", DiagCategory.Browser, "专属浏览器环境", () => { CheckBrowserEnvironment(s, browser, chain, Add); return Task.CompletedTask; }).ConfigureAwait(false);
+        var observedExit = chain?.Passed == true ? chain.ExitIp : null;
+        var intel = observedExit != null && IpEchoService.SameIp(chain?.Intel?.Ip, observedExit) ? chain?.Intel : null;
+        var consistency = EnvironmentConsistency.Evaluate(s, regional, browser, intel, observedExit);
+        foreach (var item in consistency.Checks) Add(item);
 
         var order = Enum.GetValues<DiagCategory>().ToList();
         var sorted = items.OrderBy(i => order.IndexOf(i.Category)).ThenBy(i => i.Status switch
         {
             DiagStatus.Error => 0, DiagStatus.Warning => 1, DiagStatus.Unknown => 2, DiagStatus.Info => 3, _ => 4,
         }).ToList();
-        return new DiagnosticReport(started, sw.Elapsed, sorted);
+        return new DiagnosticReport(started, sw.Elapsed, sorted) { Consistency = consistency };
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -434,7 +449,7 @@ public sealed class DiagnosticsEngine
         });
     }
 
-    private static async Task CheckRegionalAsync(AppSettings s, Action<DiagnosticItem> add, CancellationToken ct)
+    private static async Task<RegionalStatus> CheckRegionalAsync(AppSettings s, Action<DiagnosticItem> add, CancellationToken ct)
     {
         var r = await RegionalSettings.ReadStatusAsync(ct).ConfigureAwait(false);
         var details = new List<KeyValuePair<string, string>>
@@ -442,7 +457,8 @@ public sealed class DiagnosticsEngine
             new("区域格式", r.Culture),
             new("国家或地区", $"{r.GeoName}（{r.GeoId}）"),
             new("首选语言", string.Join(", ", r.LanguageTags)),
-            new("显示语言", r.UiLanguageOverride != null ? $"{r.UiLanguageOverride}（覆盖）" : r.CurrentUiLanguage),
+            new("当前显示语言", r.CurrentUiLanguage),
+            new("显示语言覆盖", r.UiLanguageOverride ?? "未设置"),
             new("已安装显示语言", string.Join(", ", r.InstalledUiLanguages)),
             new("时区", r.TimeZoneDisplay),
             new("自动设置时区", r.AutoTimeZoneEnabled ? "开启" : "关闭"),
@@ -459,6 +475,7 @@ public sealed class DiagnosticsEngine
             Uncertainty = "网页可见的语言与时区来自浏览器自身设置和 Windows 时区；显示语言更改需要注销后才会生效。",
             Details = details,
         });
+        return r;
     }
 
     private static async Task CheckSystemDnsAsync(Action<DiagnosticItem> add)
@@ -576,16 +593,17 @@ public sealed class DiagnosticsEngine
         {
             var cls = intel.Classification;
             var details = intel.Sources.Select(src => new KeyValuePair<string, string>(src.Name,
-                src.Ok ? $"{src.CountryCode} {src.Region} {src.City} | {src.Asn} {src.Org ?? src.Isp} {(src.Type != null ? "| 类型 " + src.Type : "")}{(src.IsProxy == true ? " | 标记为代理" : "")}{(src.IsVpn == true ? " | 标记为 VPN" : "")}"
+                src.Ok ? $"{src.CountryCode} {src.Region} {src.City} | {src.Asn} {src.Org ?? src.Isp} | 时区 {src.Timezone ?? "未知"} | 类型 {src.Type ?? "未知"} | 机房 {Flag(src.IsDatacenter)} / VPN {Flag(src.IsVpn)} / 代理 {Flag(src.IsProxy)} / Tor {Flag(src.IsTor)}{(src.RiskScore.HasValue ? $" | {src.Name} 风险分数 {src.RiskScore}/100" : "")}"
                        : $"查询失败：{src.Error}")).ToList();
             add(new DiagnosticItem
             {
                 Id = "exit-intel", Category = DiagCategory.Network, Title = "二级出口 IP 信息",
-                Status = cls == IpClass.Datacenter || intel.AnyProxyFlag || intel.CountryDisagreement ? DiagStatus.Warning : DiagStatus.Info,
-                Detected = $"{intel.Ip}：{intel.CountryCode} {intel.Region} {intel.City}，{intel.Asn} {intel.Org}，网络类型：{IpIntel.Describe(cls)}",
-                Explanation = cls == IpClass.Datacenter ? "数据库将该 IP 识别为数据中心网络。若你购买的是住宅/ISP 代理，请向服务商确认。" :
+                Status = !intel.Sources.Any(src => src.Ok) ? DiagStatus.Unknown : cls == IpClass.Datacenter || intel.AnyProxyFlag || intel.CountryDisagreement || intel.ClassificationDisagreement ? DiagStatus.Warning : DiagStatus.Info,
+                Detected = $"{intel.Ip}：{intel.CountryCode} {intel.Region} {intel.City}，{intel.Asn} {intel.Org}，网络类型：{(intel.ClassificationDisagreement ? "来源分歧" : IpIntel.Describe(cls))}",
+                Explanation = intel.ClassificationDisagreement ? "数据源对是否属于机房存在分歧，保留各自结果；未命中机房标记不能证明住宅。" :
+                              cls == IpClass.Datacenter ? "数据库将该 IP 识别为数据中心网络。若你购买的是住宅/ISP 代理，请向服务商确认。" :
                               intel.CountryDisagreement ? "不同数据库对该 IP 的国家判断不一致，常见于新分配或刚迁移的地址。" : null,
-                Uncertainty = "IP 类型与地理位置来自第三方数据库，可能滞后或不准确，仅供参考，不代表任何平台的判断。",
+                Uncertainty = "IPQuery / IPLocate 的类型、位置与风险数据可能滞后或不准确。IPQuery 风险分数与本机一致性评分独立，不代表 Scamalytics 或任何平台的判断。",
                 Details = details,
             });
             if (route.Protected && IsRouteCurrent(route)) _session?.SetIntel(intel);
@@ -725,16 +743,6 @@ public sealed class DiagnosticsEngine
             Details = r.WebRtcLocalIps.Select(ip => new KeyValuePair<string, string>("本地地址", ip)).ToList(),
         });
 
-        var winTz = TimeZoneInfo.Local;
-        var browserOffset = r.TzOffsetMinutes ?? 0;
-        var winOffset = (int)winTz.GetUtcOffset(DateTime.Now).TotalMinutes;
-        var langOk = r.Languages.FirstOrDefault()?.StartsWith(s.Browser.AcceptLanguages.Split(',')[0], StringComparison.OrdinalIgnoreCase) == true;
-        add(new DiagnosticItem
-        {
-            Id = "browser-locale", Category = DiagCategory.Browser, Title = "浏览器语言与时区", Status = DiagStatus.Info,
-            Detected = $"语言首选 {r.Languages.FirstOrDefault() ?? "-"}{(langOk ? "（与设置一致）" : $"（设置为 {s.Browser.AcceptLanguages}）")}；时区 {r.TimeZone}{(browserOffset == winOffset ? "（与 Windows 一致）" : "（与 Windows 不一致）")}",
-            Explanation = "浏览器时区来自 Windows 时区设置；语言来自专属浏览器自己的语言偏好。这里只陈述事实，不评估任何“风险分数”。",
-        });
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -748,6 +756,7 @@ public sealed class DiagnosticsEngine
     }
 
     private static string OnOff(bool? b) => b == null ? "未知" : b.Value ? "开" : "关";
+    private static string Flag(bool? b) => b == null ? "未知" : b.Value ? "是" : "否";
     private static string Svc(ServiceState s) => s switch
     {
         ServiceState.Running => "运行中",

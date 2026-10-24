@@ -276,6 +276,19 @@
                     </StackPanel>
                 </Border>
 
+                <Border Style="{StaticResource Surface}">
+                    <StackPanel>
+                        <TextBlock Text="出口 IP 质量检测" Style="{StaticResource CardTitle}" FontSize="16" />
+                        <TextBlock Text="{Binding QualityIpText}" Style="{StaticResource Body}" Margin="0,6,0,0" />
+                        <TextBlock Text="打开 Scamalytics 对应 IP 的网页，查看 Fraud Score 和风险标签，无需填写 API Key。"
+                                   Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                        <ui:Button Content="查看出口 IP 质量（Scamalytics）" Icon="{ui:SymbolIcon Open24}"
+                                   Command="{Binding CheckExitQualityCommand}" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding QualityStatus}" Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                   Visibility="{Binding QualityStatus, Converter={StaticResource NullToCollapsed}}" />
+                    </StackPanel>
+                </Border>
+
                 <!-- ================= Protection ================= -->
                 <Border Style="{StaticResource Surface}">
                     <StackPanel>

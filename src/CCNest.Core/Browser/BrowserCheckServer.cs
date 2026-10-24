@@ -10,6 +10,7 @@ namespace CCNest.Core.Browser;
 
 public sealed record BrowserCheckResult
 {
+    public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.UtcNow;
     public List<string> Languages { get; init; } = new();
     public string? Language { get; init; }
     public string? TimeZone { get; init; }
@@ -104,7 +105,7 @@ public sealed class BrowserCheckServer : IAsyncDisposable
                     await RespondAsync(stream, 400, "text/plain", "bad request").ConfigureAwait(false);
                     return;
                 }
-                _result.TrySetResult(result);
+                _result.TrySetResult(result with { CapturedAt = DateTimeOffset.UtcNow });
                 await RespondAsync(stream, 200, "application/json", "{\"ok\":true}").ConfigureAwait(false);
             }
             else

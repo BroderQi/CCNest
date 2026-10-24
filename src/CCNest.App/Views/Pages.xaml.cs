@@ -12,3 +12,4 @@ public partial class SystemEnvPage : UserControl { public SystemEnvPage() => Ini
 public partial class RestoreCenterPage : UserControl { public RestoreCenterPage() => InitializeComponent(); }
 public partial class LogsPage : UserControl { public LogsPage() => InitializeComponent(); }
 public partial class SettingsPage : UserControl { public SettingsPage() => InitializeComponent(); }
+public partial class GuidePage : UserControl { public GuidePage() => InitializeComponent(); }

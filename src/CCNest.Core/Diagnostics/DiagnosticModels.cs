@@ -11,6 +11,7 @@ public enum DiagStatus
 
 public enum DiagCategory
 {
+    Consistency,
     Network,
     Proxy,
     Dns,
@@ -48,10 +49,12 @@ public sealed record DiagnosticItem
     public string? ManualSteps { get; init; }
     public string? Uncertainty { get; init; }
     public RepairAction? Repair { get; init; }
+    public int? ConsistencyWeight { get; init; }
     public IReadOnlyList<KeyValuePair<string, string>> Details { get; init; } = Array.Empty<KeyValuePair<string, string>>();
 
     public static string CategoryName(DiagCategory c) => c switch
     {
+        DiagCategory.Consistency => "环境一致性（正常 / 风险）",
         DiagCategory.Network => "网络出口",
         DiagCategory.Proxy => "代理线路",
         DiagCategory.Dns => "DNS",
@@ -66,6 +69,7 @@ public sealed record DiagnosticItem
 
 public sealed record DiagnosticReport(DateTime StartedAt, TimeSpan Duration, IReadOnlyList<DiagnosticItem> Items)
 {
+    public ConsistencyAssessment? Consistency { get; init; }
     public int Errors => Items.Count(i => i.Status == DiagStatus.Error);
     public int Warnings => Items.Count(i => i.Status == DiagStatus.Warning);
     public int Repairable => Items.Count(i => i.Repair != null);
@@ -75,6 +79,11 @@ public sealed record DiagnosticReport(DateTime StartedAt, TimeSpan Duration, IRe
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"CCNest 诊断报告  {StartedAt:yyyy-MM-dd HH:mm:ss}  （用时 {Duration.TotalSeconds:F1} 秒）");
         sb.AppendLine($"CCNest {AppInfo.Version} / Windows {Environment.OSVersion.Version}");
+        if (Consistency is { } score)
+        {
+            sb.AppendLine($"环境一致性：{score.ScoreText}；{score.Summary}");
+            sb.AppendLine("按已确认的一致性项目计分，未知项目不计分；IP 信誉评分单独展示。此分数不代表任何平台的账号风控判断。");
+        }
         sb.AppendLine(new string('=', 60));
         foreach (var g in Items.GroupBy(i => i.Category))
         {
