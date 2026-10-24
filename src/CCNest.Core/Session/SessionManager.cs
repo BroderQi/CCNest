@@ -46,11 +46,82 @@ public sealed class SessionManager : IAsyncDisposable
     public event Action<string, string>? Notification; // title, message
 
     public SessionStatusInfo Status => _status;
+    public bool HasSession => _journal != null || _status.State != SessionState.Inactive;
     public bool IsActive => _status.State is not (SessionState.Inactive or SessionState.Activating or SessionState.Deactivating) && _journal != null;
     public int? MixedPort => _ports?.Mixed;
     public int? ProbePort => _ports?.ProbeChain;
     public SessionJournal? Journal => _journal;
     public HelperClient? Helper => _helper;
+
+    /// <summary>The running configuration, independent of edits saved for the next activation.</summary>
+    public AppSettings? GetActiveSettingsSnapshot()
+    {
+        var active = _activeSettings;
+        if (active == null) return null;
+        var snapshot = SettingsStore.Clone(active);
+        snapshot.SecondStage.ExpectedExitIp = _journal?.ExpectedExitIp ?? _verifiedIp ?? snapshot.SecondStage.ExpectedExitIp;
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Tests the current user route without changing the gate or connecting to the original proxies.
+    /// Network I/O runs outside the operation lock so monitoring and restoration remain available.
+    /// </summary>
+    public async Task<ChainTestResult> TestCurrentRouteAsync(IProgress<ChainStep>? progress = null,
+        bool lookupIntel = true, CancellationToken ct = default)
+    {
+        ChainTestResult Failure(string detail, string? hint = null)
+        {
+            var step = new ChainStep("current", "当前受保护线路", StepStatus.Failed, detail, TimeSpan.Zero, hint);
+            progress?.Report(step);
+            return new ChainTestResult(new[] { step }, null, null, null, null, null, null) { Mode = RouteTestMode.Protected };
+        }
+
+        string sessionId;
+        SidecarPorts ports;
+        RoutingScope scope;
+        string? expected;
+        await _opLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!IsActive || _ports == null || _activeSettings == null)
+                return Failure("当前没有可检测的已激活线路，或环境正在切换。", "请等待激活或恢复完成后重新检测。");
+            if (!_status.GateOpen || _status.State == SessionState.Blocked)
+                return Failure($"当前线路保持阻断：{_status.Detail}", "请先在首页重新验证；线路检测不会打开闸门或绕过保护。");
+            sessionId = _journal!.SessionId;
+            ports = _ports;
+            scope = _activeSettings.Protection.Scope;
+            expected = _journal.ExpectedExitIp ?? _verifiedIp;
+        }
+        finally
+        {
+            _opLock.Release();
+        }
+
+        var result = await ProtectedRouteTester.RunAsync(ports.Mixed, ports.ProbeChain, scope, expected,
+            progress, lookupIntel, ct).ConfigureAwait(false);
+
+        await _opLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Never present a completed probe as proof for a different or newly blocked session.
+            if (!IsActive || _journal?.SessionId != sessionId || _ports != ports ||
+                !_status.GateOpen || _status.State == SessionState.Blocked ||
+                !string.Equals(expected, _journal.ExpectedExitIp ?? _verifiedIp, StringComparison.Ordinal))
+            {
+                var step = new ChainStep("session-changed", "当前会话状态", StepStatus.Failed,
+                    "检测期间环境、期望出口或保护状态已变化，本次结果不能确认当前线路可用。", TimeSpan.Zero,
+                    "请等待环境稳定后重新检测。");
+                progress?.Report(step);
+                return result with { Steps = result.Steps.Append(step).ToArray(), Intel = null };
+            }
+            return result;
+        }
+        finally
+        {
+            _opLock.Release();
+        }
+    }
 
     // =====================================================================================
     // Activation

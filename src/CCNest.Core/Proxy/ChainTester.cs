@@ -14,9 +14,16 @@ public enum StepStatus
 
 public sealed record ChainStep(string Id, string Title, StepStatus Status, string Detail, TimeSpan Duration, string? Hint = null);
 
+public enum RouteTestMode
+{
+    Original,
+    Protected,
+}
+
 public sealed record ChainTestResult(IReadOnlyList<ChainStep> Steps, string? FirstStageExitIp, string? ExitIp, string? ExitCountry,
     string? ClaudeEdgeIp, string? ClaudeEdgeCountry, IpIntel? Intel)
 {
+    public RouteTestMode Mode { get; init; } = RouteTestMode.Original;
     public bool Passed => Steps.All(s => s.Status is StepStatus.Passed or StepStatus.Warning or StepStatus.Skipped);
     public ChainStep? FirstFailure => Steps.FirstOrDefault(s => s.Status == StepStatus.Failed);
 }

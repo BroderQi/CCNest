@@ -22,6 +22,12 @@ public sealed partial class NetworkViewModel : PageViewModel
         {
             if (!IsDirty) Load();
         });
+        services.Session.StatusChanged += _ => Ui(() =>
+        {
+            OnPropertyChanged(nameof(SessionActive));
+            OnPropertyChanged(nameof(TestActionText));
+            OnPropertyChanged(nameof(TestDescription));
+        });
     }
 
     public override string Key => "network";
@@ -96,14 +102,19 @@ public sealed partial class NetworkViewModel : PageViewModel
     [ObservableProperty] private bool _isDirty;
     [ObservableProperty] private string? _validationError;
 
-    public bool SessionActive => Services.Session.Journal != null;
+    public bool SessionActive => Services.Session.HasSession;
+    public string TestActionText => SessionActive ? "检测当前受保护线路" : "保存并逐级测试原始线路";
+    public string TestDescription => SessionActive
+        ? "通过当前内核检查受保护线路、实际出口与 Claude 连通性。保持现有保护；本页修改需保存并在下次激活时生效，原始逐级测试仅在环境结束后执行。"
+        : "保存本页配置并测试原始线路：一级可用 → 能连到二级 → 二级认证 → 最终出口 → 与期望 IP 比对 → Claude 服务可达。不修改系统网络设置。";
 
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
         if (e.PropertyName is nameof(IsDirty) or nameof(IsBusy) or nameof(BusyText) or nameof(TestResult) or nameof(TestSummary) or nameof(IntelSummary)
             or nameof(ValidationError) or nameof(Clash) or nameof(ClashSummary) or nameof(ClashFound) or nameof(PasteText) or nameof(ImportedNodeSummary)
-            or nameof(SelectedConfigNode) or nameof(ImportYaml) or nameof(ManualText) or nameof(SessionActive) or nameof(EndpointWarning)) return;
+            or nameof(SelectedConfigNode) or nameof(ImportYaml) or nameof(ManualText) or nameof(SessionActive) or nameof(TestActionText)
+            or nameof(TestDescription) or nameof(EndpointWarning)) return;
         IsDirty = true;
     }
 
@@ -364,8 +375,22 @@ public sealed partial class NetworkViewModel : PageViewModel
     private void Revert() => Load();
 
     [RelayCommand]
-    private Task TestAsync() => RunBusyAsync("正在逐级测试线路…", async () =>
+    private Task TestAsync() => RunBusyAsync(SessionActive ? "正在检测当前受保护线路…" : "正在逐级测试原始线路…", async () =>
     {
+        TestSteps.Clear();
+        TestResult = null;
+        TestSummary = null;
+        IntelSummary = null;
+        ValidationError = null;
+
+        if (Services.Session.HasSession)
+        {
+            // Test the running snapshot; unsaved or next-activation settings must not affect it.
+            var activeProgress = new Progress<ChainStep>(step => { if (TestResult == null) TestSteps.Add(step); });
+            ShowTestResult(await Services.Session.TestCurrentRouteAsync(activeProgress));
+            return;
+        }
+
         if (!TryBuild(out var settings, out var error))
         {
             ValidationError = error;
@@ -374,11 +399,6 @@ public sealed partial class NetworkViewModel : PageViewModel
         ValidationError = null;
         Services.Settings.Save(settings);
         IsDirty = false;
-
-        TestSteps.Clear();
-        TestResult = null;
-        TestSummary = null;
-        IntelSummary = null;
 
         List<ProxyEndpoint>? first = settings.FirstStage.Mode switch
         {
@@ -406,16 +426,9 @@ public sealed partial class NetworkViewModel : PageViewModel
                 first = new() { new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = ports.ProbeFirst!.Value } };
             }
 
-            var progress = new Progress<ChainStep>(step => TestSteps.Add(step));
+            var progress = new Progress<ChainStep>(step => { if (TestResult == null) TestSteps.Add(step); });
             var result = await ChainTester.RunAsync(first, SettingsStore.ResolveSecondStage(settings), settings.SecondStage.ExpectedExitIp, progress, lookupIntel: true);
-            TestResult = result;
-            foreach (var step in result.Steps)
-                Log.Write(step.Status == StepStatus.Failed ? LogLevel.Warn : LogLevel.Info, "RouteTest", $"[{step.Status}] {step.Title}: {step.Detail}");
-            TestSummary = result.Passed
-                ? $"线路可用：一级出口 {result.FirstStageExitIp ?? "—"} → 二级出口 {result.ExitIp}，Claude 边缘看到 {result.ClaudeEdgeIp ?? "—"}（{result.ClaudeEdgeCountry ?? "—"}）"
-                : $"线路未通过：{result.FirstFailure?.Title} — {result.FirstFailure?.Detail}";
-            if (result.Intel is { } intel)
-                IntelSummary = $"{intel.Ip} · {intel.CountryCode} {intel.Region} {intel.City} · {intel.Asn} {intel.Org} · 网络类型：{IpIntel.Describe(intel.Classification)}（数据库判断，仅供参考）";
+            ShowTestResult(result);
             if (result.Passed && string.IsNullOrWhiteSpace(ExpectedIp) && result.ExitIp != null)
             {
                 var use = await Services.Dialogs.ConfirmAsync("设为期望出口 IP？",
@@ -432,4 +445,24 @@ public sealed partial class NetworkViewModel : PageViewModel
             if (temp != null) await temp.DisposeAsync();
         }
     });
+
+    private void ShowTestResult(ChainTestResult result)
+    {
+        TestResult = result;
+        // Reconcile asynchronous progress callbacks with the complete result before displaying it.
+        TestSteps.Clear();
+        foreach (var step in result.Steps)
+        {
+            TestSteps.Add(step);
+            Log.Write(step.Status == StepStatus.Failed ? LogLevel.Warn : LogLevel.Info, "RouteTest", $"[{step.Status}] {step.Title}: {step.Detail}");
+        }
+        var label = result.Mode == RouteTestMode.Protected ? "当前受保护线路" : "原始线路";
+        TestSummary = result.Passed
+            ? result.Mode == RouteTestMode.Protected
+                ? $"{label}可用：出口 {result.ExitIp}，Claude 边缘看到 {result.ClaudeEdgeIp ?? "—"}（{result.ClaudeEdgeCountry ?? "—"}）"
+                : $"{label}可用：一级出口 {result.FirstStageExitIp ?? "—"} → 二级出口 {result.ExitIp}，Claude 边缘看到 {result.ClaudeEdgeIp ?? "—"}（{result.ClaudeEdgeCountry ?? "—"}）"
+            : $"{label}未通过：{result.FirstFailure?.Title} — {result.FirstFailure?.Detail}";
+        if (result.Intel is { } intel)
+            IntelSummary = $"{intel.Ip} · {intel.CountryCode} {intel.Region} {intel.City} · {intel.Asn} {intel.Org} · 网络类型：{IpIntel.Describe(intel.Classification)}（数据库判断，仅供参考）";
+    }
 }

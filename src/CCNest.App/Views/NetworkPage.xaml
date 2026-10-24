@@ -238,10 +238,10 @@
                 <Border Style="{StaticResource Surface}">
                     <StackPanel>
                         <DockPanel>
-                            <ui:Button DockPanel.Dock="Right" Appearance="Primary" Content="保存并逐级测试" Icon="{ui:SymbolIcon PlugConnected24}" Command="{Binding TestCommand}" />
+                            <ui:Button DockPanel.Dock="Right" Appearance="Primary" Content="{Binding TestActionText}" Icon="{ui:SymbolIcon PlugConnected24}" Command="{Binding TestCommand}" />
                             <StackPanel>
                                 <TextBlock Text="③ 测试线路" Style="{StaticResource CardTitle}" FontSize="16" />
-                                <TextBlock Text="不修改任何系统设置，逐级验证：一级可用 → 能连到二级 → 二级认证 → 最终出口 → 与期望 IP 比对 → Claude 服务可达。" Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding TestDescription}" Style="{StaticResource Caption}" Margin="0,2,0,0" />
                             </StackPanel>
                         </DockPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">

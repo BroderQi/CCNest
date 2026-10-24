@@ -61,6 +61,15 @@ public static class IpEchoService
         return new ExitIpResult(await Task.WhenAll(tasks).ConfigureAwait(false));
     }
 
+    /// <summary>Observes only Claude's edge, so a Claude-only route is tested through its real routing rules.</summary>
+    public static async Task<ExitIpResult> ObserveClaudeAsync(IReadOnlyList<ProxyEndpoint> hops, TimeSpan timeout,
+        CancellationToken ct = default)
+    {
+        using var client = ChainHttp.Create(hops, timeout, allowRedirects: false);
+        var tasks = V4Sources.Where(s => s.Name == ClaudeTraceSource).Select(s => QueryAsync(client, s, ct));
+        return new ExitIpResult(await Task.WhenAll(tasks).ConfigureAwait(false));
+    }
+
     /// <summary>Light-weight single check used by the periodic monitor (rotates through sources).</summary>
     public static async Task<IpObservation> QuickAsync(int localHttpProxyPort, int rotation, TimeSpan timeout, CancellationToken ct = default)
     {

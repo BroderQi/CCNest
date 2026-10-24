@@ -4,6 +4,7 @@ using CCNest.Core.Claude;
 using CCNest.Core.Elevation;
 using CCNest.Core.Infrastructure;
 using CCNest.Core.Mihomo;
+using CCNest.Core.Native;
 using CCNest.Core.Proxy;
 using CCNest.Core.Repair;
 using CCNest.Core.Session;
@@ -27,6 +28,7 @@ public sealed record DiagnosticsOptions
 /// </summary>
 public sealed class DiagnosticsEngine
 {
+    private sealed record RouteContext(bool Protected, string? SessionId);
     private readonly SettingsStore _settings;
     private readonly SessionManager? _session;
 
@@ -41,7 +43,11 @@ public sealed class DiagnosticsEngine
         var started = DateTime.Now;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var items = new List<DiagnosticItem>();
-        var s = SettingsStore.Clone(_settings.Current);
+        // Saved settings can differ from the running core. Keep the route selected for this run,
+        // including an in-progress/blocked session, so a later check never falls back to raw hops.
+        var protectedRoute = _session?.HasSession == true;
+        var route = new RouteContext(protectedRoute, protectedRoute ? _session?.Journal?.SessionId : null);
+        var s = (protectedRoute ? _session?.GetActiveSettingsSnapshot() : null) ?? SettingsStore.Clone(_settings.Current);
         void Add(DiagnosticItem item)
         {
             lock (items) items.Add(item);
@@ -63,12 +69,12 @@ public sealed class DiagnosticsEngine
         await Guard("orphan", DiagCategory.Security, "会话状态", () => { CheckOrphan(Add); return Task.CompletedTask; }).ConfigureAwait(false);
         await Guard("core", DiagCategory.Security, "代理内核", () => { CheckCore(s, Add); return Task.CompletedTask; }).ConfigureAwait(false);
         await Guard("firewall", DiagCategory.Security, "防火墙与 WFP", () => { CheckFirewall(Add); return Task.CompletedTask; }).ConfigureAwait(false);
-        await Guard("sysproxy", DiagCategory.Routing, "Windows 系统代理", () => CheckSystemProxyAsync(Add)).ConfigureAwait(false);
+        await Guard("sysproxy", DiagCategory.Routing, "Windows 系统代理", () => CheckSystemProxyAsync(s, Add)).ConfigureAwait(false);
         await Guard("env", DiagCategory.Routing, "代理环境变量", () => { CheckEnvVars(Add); return Task.CompletedTask; }).ConfigureAwait(false);
         await Guard("routes", DiagCategory.Routing, "路由与虚拟网卡", () => { CheckRoutes(Add); return Task.CompletedTask; }).ConfigureAwait(false);
         await Guard("browser", DiagCategory.Browser, "专属浏览器", () => { CheckBrowser(s, Add); return Task.CompletedTask; }).ConfigureAwait(false);
 
-        var clashTask = Guard("clash", DiagCategory.Proxy, "现有 Clash / Mihomo", () => CheckClashAsync(s, Add, ct));
+        var clashTask = Guard("clash", DiagCategory.Proxy, "现有 Clash / Mihomo", () => CheckClashAsync(s, route, Add, ct));
         var claudeTask = Guard("claude", DiagCategory.Claude, "Claude 应用", () => CheckClaudeAppsAsync(Add, ct));
         var regionalTask = Guard("regional", DiagCategory.System, "Windows 区域与语言", () => CheckRegionalAsync(s, Add, ct));
         var dnsTask = Guard("dns-system", DiagCategory.Dns, "系统 DNS", () => CheckSystemDnsAsync(Add));
@@ -76,13 +82,13 @@ public sealed class DiagnosticsEngine
         await Task.WhenAll(clashTask, claudeTask, regionalTask, dnsTask, directTask).ConfigureAwait(false);
 
         ChainTestResult? chain = null;
-        if (options.IncludeChainTest && !string.IsNullOrWhiteSpace(s.SecondStage.Endpoint.Host))
-            await Guard("chain", DiagCategory.Proxy, "双重代理线路", async () => chain = await CheckChainAsync(s, Add, ct).ConfigureAwait(false)).ConfigureAwait(false);
+        if (options.IncludeChainTest && (route.Protected || !string.IsNullOrWhiteSpace(s.SecondStage.Endpoint.Host)))
+            await Guard("chain", DiagCategory.Proxy, "双重代理线路", async () => chain = await CheckChainAsync(s, route, Add, ct).ConfigureAwait(false)).ConfigureAwait(false);
 
-        if (options.IncludeDnsLeakTest && chain?.Passed == true)
-            await Guard("dns-leak", DiagCategory.Dns, "DNS 泄漏检测", () => CheckDnsLeakAsync(s, chain, Add, ct)).ConfigureAwait(false);
+        if (options.IncludeDnsLeakTest && (route.Protected || chain?.Passed == true))
+            await Guard("dns-leak", DiagCategory.Dns, "DNS 泄漏检测", () => CheckDnsLeakAsync(s, route, chain, Add, ct)).ConfigureAwait(false);
 
-        await Guard("clock", DiagCategory.System, "系统时间", () => CheckClockAsync(Add, ct)).ConfigureAwait(false);
+        await Guard("clock", DiagCategory.System, "系统时间", () => CheckClockAsync(route, Add, ct)).ConfigureAwait(false);
 
         if (options.BrowserCheck != null)
             await Guard("browser-env", DiagCategory.Browser, "专属浏览器环境", () => { CheckBrowserEnvironment(s, options.BrowserCheck, chain, Add); return Task.CompletedTask; }).ConfigureAwait(false);
@@ -178,12 +184,12 @@ public sealed class DiagnosticsEngine
         }
     }
 
-    private async Task CheckSystemProxyAsync(Action<DiagnosticItem> add)
+    private async Task CheckSystemProxyAsync(AppSettings s, Action<DiagnosticItem> add)
     {
         var state = SystemProxy.Backend.Read();
         var port = state.LoopbackPort();
         var active = _session?.IsActive == true;
-        var ccnestPort = _settings.Current.Advanced.MixedPort;
+        var ccnestPort = active ? _session!.MixedPort ?? s.Advanced.MixedPort : s.Advanced.MixedPort;
         var winhttp = await SystemProxy.ReadWinHttpProxyAsync().ConfigureAwait(false);
         var details = new List<KeyValuePair<string, string>> { new("WinHTTP 代理", winhttp ?? "直接访问") };
         if (state.Bypass != null) details.Add(new("例外列表", state.Bypass));
@@ -205,7 +211,7 @@ public sealed class DiagnosticsEngine
 
         var status = DiagStatus.Info;
         string? explanation = null;
-        if (active && port != ccnestPort && _settings.Current.Integrations.SetSystemProxy)
+        if (active && port != ccnestPort && s.Integrations.SetSystemProxy)
         {
             status = DiagStatus.Warning;
             explanation = "会话激活期间系统代理没有指向 CCNest，遵循系统代理的应用（如 Claude Desktop）可能绕过二级出口。";
@@ -311,11 +317,17 @@ public sealed class DiagnosticsEngine
         });
     }
 
-    private async Task CheckClashAsync(AppSettings s, Action<DiagnosticItem> add, CancellationToken ct)
+    private async Task CheckClashAsync(AppSettings s, RouteContext route, Action<DiagnosticItem> add, CancellationToken ct)
     {
         var env = await ClashDetector.DetectAsync(s.FirstStage.ControllerAddress, SecretStore.Get(SecretStore.ClashControllerSecret), ct).ConfigureAwait(false);
+        var systemProtected = route.Protected && s.Protection.Level == ProtectionLevel.SystemTun;
+        var configuredListening = systemProtected && s.FirstStage.Mode == FirstStageMode.ClashLocalPort
+            && IpHelper.GetTcpListeners().Any(l => l.Port == s.FirstStage.LocalPort && (env.CorePid == null || l.Pid == env.CorePid));
+        var protocolProbeRestricted = configuredListening && env.Ports.All(p => p.Port != s.FirstStage.LocalPort);
         var details = new List<KeyValuePair<string, string>>();
         foreach (var p in env.Ports) details.Add(new("本地端口", $"{p.Port}（{(p.Socks5 && p.Http ? "混合" : p.Socks5 ? "SOCKS5" : "HTTP")}）"));
+        if (protocolProbeRestricted)
+            details.Add(new("本地端口", $"{s.FirstStage.LocalPort} 正在监听；全局保护会限制 CCNest 界面直接探测一级端口，协议未单独确认"));
         details.Add(new("控制接口", env.ControllerReachable ? $"{env.ControllerAddress}（mihomo {env.CoreVersion}）" : env.ControllerError ?? "未找到"));
         if (env.Mode != null) details.Add(new("代理模式", env.Mode));
         if (env.TunEnabled != null) details.Add(new("TUN", env.TunEnabled == true ? "开启" : "关闭"));
@@ -331,12 +343,16 @@ public sealed class DiagnosticsEngine
         else
         {
             status = env.ClientProxyGuardEnabled == true && s.Integrations.SetSystemProxy ? DiagStatus.Warning : DiagStatus.Ok;
-            detected = $"{env.ClientName}{(env.CoreProcessName != null ? $"（内核 {env.CoreProcessName}）" : "")}，推荐串联端口 {env.RecommendedPort?.Port.ToString() ?? "无"}";
+            detected = $"{env.ClientName}{(env.CoreProcessName != null ? $"（内核 {env.CoreProcessName}）" : "")}，"
+                + (protocolProbeRestricted ? $"一级端口 {s.FirstStage.LocalPort} 正在监听（直接协议探测受保护规则限制）"
+                    : $"推荐串联端口 {env.RecommendedPort?.Port.ToString() ?? "无"}");
         }
 
         // Health of the nodes currently selected in the client (through its controller, read-only).
         var nodeProblems = new List<string>();
-        if (env.ControllerReachable && env.ControllerAddress != null)
+        if (systemProtected)
+            details.Add(new("一级节点测速", "全局保护期间不单独测试客户端节点；线路可用性以当前 CCNest 内核检测为准"));
+        else if (env.ControllerReachable && env.ControllerAddress != null)
         {
             try
             {
@@ -356,7 +372,8 @@ public sealed class DiagnosticsEngine
         if (nodeProblems.Count > 0 && status == DiagStatus.Ok)
             status = s.FirstStage.Mode == FirstStageMode.ClashLocalPort ? DiagStatus.Error : DiagStatus.Warning;
 
-        var configured = s.FirstStage.Mode == FirstStageMode.ClashLocalPort && env.Ports.All(p => p.Port != s.FirstStage.LocalPort) && env.Found;
+        var configured = s.FirstStage.Mode == FirstStageMode.ClashLocalPort && env.Ports.All(p => p.Port != s.FirstStage.LocalPort)
+            && !configuredListening && env.Found;
         add(new DiagnosticItem
         {
             Id = "clash", Category = DiagCategory.Proxy, Title = "现有 Clash / Mihomo", Status = configured ? DiagStatus.Warning : status,
@@ -484,59 +501,73 @@ public sealed class DiagnosticsEngine
             });
     }
 
-    private async Task<ChainTestResult?> CheckChainAsync(AppSettings s, Action<DiagnosticItem> add, CancellationToken ct)
+    private bool IsRouteCurrent(RouteContext route) => route.Protected
+        ? route.SessionId != null && _session?.HasSession == true && _session.Journal?.SessionId == route.SessionId
+            && _session.Status.State is not (SessionState.Inactive or SessionState.Activating or SessionState.Deactivating)
+        : _session?.HasSession != true;
+
+    private async Task<ChainTestResult?> CheckChainAsync(AppSettings s, RouteContext route, Action<DiagnosticItem> add, CancellationToken ct)
     {
-        var second = SettingsStore.ResolveSecondStage(s);
-        if (second.Validate() is { } err)
+        if (!IsRouteCurrent(route))
         {
-            add(new DiagnosticItem { Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Error, Detected = "二级代理配置无效：" + err });
+            add(new DiagnosticItem { Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Unknown,
+                Detected = "环境状态已变化或正在切换，本次未检测线路，请在环境稳定后重新检测。" });
             return null;
         }
 
-        List<ProxyEndpoint>? first = s.FirstStage.Mode switch
+        ChainTestResult result;
+        if (route.Protected)
         {
-            FirstStageMode.ClashLocalPort => new() { new ProxyEndpoint { Protocol = s.FirstStage.LocalProtocol, Host = s.FirstStage.LocalHost, Port = s.FirstStage.LocalPort } },
-            FirstStageMode.ManualProxy => new() { SettingsStore.ResolveManualFirstStage(s) },
-            FirstStageMode.None => new(),
-            _ => null,
-        };
-        if (first == null && _session?.IsActive == true && _session.ProbePort is { } probe)
-        {
-            // Imported node: the active core exposes the chain on its probe port.
-            first = null;
-            var obs = await IpEchoService.ObserveAsync(new[] { new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = probe } }, TimeSpan.FromSeconds(10), true, ct).ConfigureAwait(false);
-            add(new DiagnosticItem
-            {
-                Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = obs.AnySuccess ? DiagStatus.Ok : DiagStatus.Error,
-                Detected = obs.AnySuccess ? $"经导入节点 → 二级代理，出口 {obs.ConsensusIp}" : obs.Summary,
-            });
-            return null;
+            // The active core owns its upstream credentials and the running configuration.
+            result = await _session!.TestCurrentRouteAsync(lookupIntel: true, ct: ct).ConfigureAwait(false);
         }
-        if (first == null)
+        else
         {
-            add(new DiagnosticItem
+            var second = SettingsStore.ResolveSecondStage(s);
+            if (second.Validate() is { } err)
             {
-                Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Unknown,
-                Detected = "一级线路为导入节点，需要激活环境后才能检测完整线路",
-            });
-            return null;
+                add(new DiagnosticItem { Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Error, Detected = "二级代理配置无效：" + err });
+                return null;
+            }
+            List<ProxyEndpoint>? first = s.FirstStage.Mode switch
+            {
+                FirstStageMode.ClashLocalPort => new() { new ProxyEndpoint { Protocol = s.FirstStage.LocalProtocol, Host = s.FirstStage.LocalHost, Port = s.FirstStage.LocalPort } },
+                FirstStageMode.ManualProxy => new() { SettingsStore.ResolveManualFirstStage(s) },
+                FirstStageMode.None => new(),
+                _ => null,
+            };
+            if (first == null)
+            {
+                add(new DiagnosticItem { Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Unknown,
+                    Detected = "一级线路为导入节点，需要激活环境后才能检测完整线路" });
+                return null;
+            }
+
+            if (EndpointHeuristics.Analyze(second) is { } hint)
+                add(new DiagnosticItem
+                {
+                    Id = "endpoint-kind", Category = DiagCategory.Proxy, Title = "二级代理类型", Status = DiagStatus.Warning,
+                    Detected = "该代理端点可能不是固定的静态 IP", Explanation = hint.Message,
+                    Uncertainty = "根据用户名中的常见参数格式推测，请以服务商后台的产品类型为准。",
+                });
+            result = await ChainTester.RunAsync(first, second, s.SecondStage.ExpectedExitIp, null, lookupIntel: true, ct).ConfigureAwait(false);
         }
 
-        if (EndpointHeuristics.Analyze(second) is { } hint)
-            add(new DiagnosticItem
-            {
-                Id = "endpoint-kind", Category = DiagCategory.Proxy, Title = "二级代理类型", Status = DiagStatus.Warning,
-                Detected = "该代理端点可能不是固定的静态 IP", Explanation = hint.Message,
-                Uncertainty = "根据用户名中的常见参数格式推测，请以服务商后台的产品类型为准。",
-            });
-
-        var result = await ChainTester.RunAsync(first, second, s.SecondStage.ExpectedExitIp, null, lookupIntel: true, ct).ConfigureAwait(false);
+        if (!IsRouteCurrent(route))
+        {
+            add(new DiagnosticItem { Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路", Status = DiagStatus.Unknown,
+                Detected = "检测期间环境状态已变化，结果不再代表当前线路，请重新检测。" });
+            return null;
+        }
         var failure = result.FirstFailure;
         add(new DiagnosticItem
         {
-            Id = "chain", Category = DiagCategory.Proxy, Title = "双重代理线路",
+            Id = "chain", Category = DiagCategory.Proxy, Title = route.Protected ? "当前激活线路" : "双重代理线路（原始配置）",
             Status = failure != null ? DiagStatus.Error : result.Steps.Any(st => st.Status == StepStatus.Warning) ? DiagStatus.Warning : DiagStatus.Ok,
-            Detected = failure != null ? $"{failure.Title}：{failure.Detail}" : $"一级出口 {result.FirstStageExitIp ?? "-"} → 二级出口 {result.ExitIp}（Claude 边缘看到 {result.ClaudeEdgeIp ?? "-"} / {result.ClaudeEdgeCountry ?? "-"}）",
+            Detected = failure != null ? $"{failure.Title}：{failure.Detail}"
+                : route.Protected ? $"经当前 CCNest 内核，二级出口 {result.ExitIp}（Claude 边缘看到 {result.ClaudeEdgeIp ?? "-"} / {result.ClaudeEdgeCountry ?? "-"}）"
+                : $"一级出口 {result.FirstStageExitIp ?? "-"} → 二级出口 {result.ExitIp}（Claude 边缘看到 {result.ClaudeEdgeIp ?? "-"} / {result.ClaudeEdgeCountry ?? "-"}）",
+            Explanation = route.Protected ? "本次检测当前激活配置；已保存但尚未重新激活的设置未参与检测。一级端口和二级认证不由界面进程单独连接。" : null,
             ManualSteps = failure?.Hint,
             Details = result.Steps.Select(st => new KeyValuePair<string, string>(st.Title, $"[{StepName(st.Status)}] {st.Detail}")).ToList(),
         });
@@ -557,21 +588,59 @@ public sealed class DiagnosticsEngine
                 Uncertainty = "IP 类型与地理位置来自第三方数据库，可能滞后或不准确，仅供参考，不代表任何平台的判断。",
                 Details = details,
             });
-            _session?.SetIntel(intel);
+            if (route.Protected && IsRouteCurrent(route)) _session?.SetIntel(intel);
         }
         return result;
     }
 
-    private static async Task CheckDnsLeakAsync(AppSettings s, ChainTestResult chain, Action<DiagnosticItem> add, CancellationToken ct)
+    private async Task CheckDnsLeakAsync(AppSettings s, RouteContext context, ChainTestResult? chain, Action<DiagnosticItem> add, CancellationToken ct)
     {
+        void Unavailable(string reason) => add(new DiagnosticItem
+        {
+            Id = "dns-leak", Category = DiagCategory.Dns, Title = "DNS 泄漏检测（专属线路）", Status = DiagStatus.Unknown,
+            Detected = reason,
+        });
+        if (!IsRouteCurrent(context))
+        {
+            Unavailable("环境状态已变化或正在切换，本次未检测 DNS；请在环境稳定后重新检测。");
+            return;
+        }
+        if (context.Protected && (_session!.Status.State != SessionState.Protected || !_session.Status.GateOpen))
+        {
+            Unavailable("当前专属线路处于阻断或不可用状态，本次未检测 DNS；检测不会打开闸门。");
+            return;
+        }
+        if (chain?.Passed != true)
+        {
+            Unavailable("专属线路尚未通过本次检测，暂不检测 DNS。");
+            return;
+        }
         var route = new List<ProxyEndpoint>();
-        if (s.FirstStage.Mode == FirstStageMode.ClashLocalPort)
-            route.Add(new ProxyEndpoint { Protocol = s.FirstStage.LocalProtocol, Host = s.FirstStage.LocalHost, Port = s.FirstStage.LocalPort });
-        else if (s.FirstStage.Mode == FirstStageMode.ManualProxy)
-            route.Add(SettingsStore.ResolveManualFirstStage(s));
-        route.Add(SettingsStore.ResolveSecondStage(s));
+        if (context.Protected)
+        {
+            if (_session!.ProbePort is not { } probe)
+            {
+                Unavailable("当前内核的专属检测端口不可用，本次未检测 DNS。");
+                return;
+            }
+            // MixedPort may route non-Claude domains to stage one in ClaudeOnly mode.
+            route.Add(new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = probe });
+        }
+        else
+        {
+            if (s.FirstStage.Mode == FirstStageMode.ClashLocalPort)
+                route.Add(new ProxyEndpoint { Protocol = s.FirstStage.LocalProtocol, Host = s.FirstStage.LocalHost, Port = s.FirstStage.LocalPort });
+            else if (s.FirstStage.Mode == FirstStageMode.ManualProxy)
+                route.Add(SettingsStore.ResolveManualFirstStage(s));
+            route.Add(SettingsStore.ResolveSecondStage(s));
+        }
 
         var result = await DnsLeakTest.RunAsync(route, ct).ConfigureAwait(false);
+        if (!IsRouteCurrent(context) || context.Protected && (_session!.Status.State != SessionState.Protected || !_session.Status.GateOpen))
+        {
+            Unavailable("检测期间环境状态已变化，DNS 结果不再代表当前线路，请重新检测。");
+            return;
+        }
         if (!result.Available)
         {
             add(new DiagnosticItem
@@ -594,10 +663,16 @@ public sealed class DiagnosticsEngine
         });
     }
 
-    private async Task CheckClockAsync(Action<DiagnosticItem> add, CancellationToken ct)
+    private async Task CheckClockAsync(RouteContext context, Action<DiagnosticItem> add, CancellationToken ct)
     {
-        IReadOnlyList<ProxyEndpoint> route = _session?.IsActive == true && _session.MixedPort is { } port
-            ? new[] { new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = port } }
+        if (!IsRouteCurrent(context) || context.Protected && _session?.ProbePort == null)
+        {
+            add(new DiagnosticItem { Id = "clock", Category = DiagCategory.System, Title = "系统时间", Status = DiagStatus.Unknown,
+                Detected = "环境状态已变化或专属检测端口不可用，本次未获取网络时间。" });
+            return;
+        }
+        IReadOnlyList<ProxyEndpoint> route = context.Protected
+            ? new[] { new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = _session!.ProbePort!.Value } }
             : Array.Empty<ProxyEndpoint>();
         using var client = ChainHttp.Create(route, TimeSpan.FromSeconds(8));
         using var resp = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "https://www.cloudflare.com/"), ct).ConfigureAwait(false);

@@ -1,4 +1,5 @@
 using CCNest.Core.Claude;
+using CCNest.Core.Diagnostics;
 using CCNest.Core.Infrastructure;
 using CCNest.Core.Proxy;
 using CCNest.Core.Session;
@@ -27,6 +28,7 @@ public class SessionLifecycleTests : IAsyncLifetime
     public Task InitializeAsync()
     {
         AppPaths.OverrideRoot(_root);
+        StartupRegistration.RemoveRecovery(); // only the sandbox Run key configured by TestEnv
         _proxy = new FakeProxyBackend { State = new SystemProxyState { ProxyEnabled = true, ProxyServer = "corp-proxy:8080", Bypass = "<local>" } };
         SystemProxy.Backend = _proxy;
         _claudeSettings = Path.Combine(_root, "claude", "settings.json");
@@ -44,6 +46,7 @@ public class SessionLifecycleTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        StartupRegistration.RemoveRecovery();
         IpEchoService.TestSources = null;
         ChainTester.ClaudeProbeUrls = new[] { "https://claude.ai/cdn-cgi/trace", "https://api.anthropic.com/" };
         SessionManager.HealthCheckUrl = "https://www.gstatic.com/generate_204";
@@ -203,6 +206,113 @@ public class SessionLifecycleTests : IAsyncLifetime
         Assert.Null(ClaudeCodeManager.ReadManagedEnv(_claudeSettings)["HTTPS_PROXY"]);
         Assert.Null(JournalStore.FindOrphanedSession());
         Assert.False(StartupRegistration.IsRecoveryRegistered());
+    }
+
+    [SkippableFactIfNoMihomo]
+    public async Task CurrentRouteTest_UsesRunningSnapshotInsteadOfSavedProxyAndSecrets()
+    {
+        var store = CreateSettings(ExitIp);
+        await using var session = new SessionManager(store);
+        var activated = await session.ActivateAsync();
+        Assert.True(activated.Success, activated.Message);
+        var sessionId = session.Journal!.SessionId;
+
+        // These settings are for the next activation, and cannot be reached or authenticated.
+        store.Update(s =>
+        {
+            s.FirstStage.Mode = FirstStageMode.ClashLocalPort;
+            s.FirstStage.LocalPort = 1;
+            s.SecondStage.Endpoint = new ProxyEndpoint { Host = "next-activation.invalid", Port = 1, Username = "different-user" };
+            s.SecondStage.ExpectedExitIp = "203.0.113.90";
+            s.Protection.Scope = RoutingScope.ClaudeOnly;
+        });
+        SecretStore.Set(SecretStore.SecondStagePassword, "different-password");
+
+        var result = await session.TestCurrentRouteAsync(lookupIntel: false);
+
+        Assert.True(result.Passed, string.Join(" / ", result.Steps.Select(s => s.Detail)));
+        Assert.Equal(RouteTestMode.Protected, result.Mode);
+        Assert.Equal(ExitIp, result.ExitIp);
+        Assert.Equal(sessionId, session.Journal.SessionId);
+        Assert.True(session.Status.GateOpen);
+        Assert.Equal("203.0.113.90", store.Current.SecondStage.ExpectedExitIp);
+        var running = session.GetActiveSettingsSnapshot()!;
+        Assert.Equal(FirstStageMode.None, running.FirstStage.Mode);
+        Assert.Equal(RoutingScope.AllTraffic, running.Protection.Scope);
+        Assert.Equal(ExitIp, running.SecondStage.ExpectedExitIp);
+
+        var diagnostics = await new DiagnosticsEngine(store, session).RunAsync(new DiagnosticsOptions
+        {
+            IncludeDirectChecks = false,
+            IncludeDnsLeakTest = false,
+        });
+        var chain = Assert.Single(diagnostics.Items, item => item.Id == "chain");
+        Assert.Equal(DiagStatus.Ok, chain.Status);
+        Assert.Contains("当前", chain.Title);
+        Assert.Contains(ExitIp, chain.Detected);
+        Assert.True((await session.DeactivateAsync()).Success);
+    }
+
+    [SkippableFactIfNoMihomo]
+    public async Task CurrentRouteTest_BlockedSessionDoesNotUseSuccessfulProbeOrOpenGate()
+    {
+        var store = CreateSettings(ExitIp);
+        await using var session = new SessionManager(store);
+        var activated = await session.ActivateAsync();
+        Assert.True(activated.Success, activated.Message);
+        _internet.Body = "203.0.113.91";
+        Assert.False(await session.ReverifyAsync("test changed exit"));
+        Assert.Equal(SessionState.Blocked, session.Status.State);
+
+        // The diagnostic probe bypasses the gate and can work while users remain blocked.
+        var probe = new[] { new ProxyEndpoint { Protocol = ProxyProtocol.Http, Host = "127.0.0.1", Port = session.ProbePort!.Value } };
+        Assert.True((await IpEchoService.ObserveAsync(probe, TimeSpan.FromSeconds(5), includeClaude: false)).AnySuccess);
+        var result = await session.TestCurrentRouteAsync(lookupIntel: false);
+
+        Assert.False(result.Passed);
+        Assert.Equal(RouteTestMode.Protected, result.Mode);
+        Assert.Equal("current", result.FirstFailure?.Id);
+        Assert.Null(result.ExitIp);
+        Assert.Equal(SessionState.Blocked, session.Status.State);
+        Assert.False(session.Status.GateOpen);
+        Assert.True((await session.DeactivateAsync()).Success);
+    }
+
+    [Fact]
+    public async Task CurrentRouteTest_InactiveSessionDoesNotFallBackToOriginalSettings()
+    {
+        await using var session = new SessionManager(CreateSettings(ExitIp));
+
+        var result = await session.TestCurrentRouteAsync(lookupIntel: false);
+
+        Assert.False(session.HasSession);
+        Assert.False(result.Passed);
+        Assert.Equal(RouteTestMode.Protected, result.Mode);
+        Assert.Empty(_static.Targets);
+    }
+
+    [SkippableFactIfNoMihomo]
+    public async Task CurrentRouteTest_SessionEndedDuringProbeCannotReportSuccess()
+    {
+        await using var session = new SessionManager(CreateSettings(ExitIp));
+        var activated = await session.ActivateAsync();
+        Assert.True(activated.Success, activated.Message);
+        var progress = new InlineProgress(step =>
+        {
+            if (step.Id == "original") session.DeactivateAsync().GetAwaiter().GetResult();
+        });
+
+        var result = await session.TestCurrentRouteAsync(progress, lookupIntel: false);
+
+        Assert.False(result.Passed);
+        Assert.False(session.HasSession);
+        Assert.Contains(result.Steps, s => s.Id == "session-changed" && s.Status == StepStatus.Failed);
+        Assert.Null(result.Intel);
+    }
+
+    private sealed class InlineProgress(Action<ChainStep> report) : IProgress<ChainStep>
+    {
+        public void Report(ChainStep value) => report(value);
     }
 
     private static async Task<bool> WaitForAsync(Func<bool> condition, TimeSpan timeout)
