@@ -12,15 +12,21 @@
   powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 #>
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [switch]$SkipTests,
     [switch]$FetchCore,
-    [string]$Iscc = ""
+    [string]$Iscc = "",
+    [switch]$RequireInstaller
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+if (-not $Version) {
+    [xml]$props = Get-Content -LiteralPath (Join-Path $root "Directory.Build.props") -Raw
+    $Version = [string]$props.Project.PropertyGroup.Version
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "版本号必须为三个数字段，例如 1.0.1。" }
 
 $coreDir = Join-Path $root "third_party\mihomo"
 $coreExe = Join-Path $coreDir "mihomo.exe"
@@ -40,7 +46,12 @@ if (-not $SkipTests) {
 }
 
 $publish = Join-Path $root "artifacts\publish\CCNest"
-if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
+if (Test-Path -LiteralPath $publish) {
+    $resolved = [IO.Path]::GetFullPath($publish)
+    $allowed = [IO.Path]::GetFullPath((Join-Path $root "artifacts")) + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw "发布目录不在 artifacts 内，拒绝清理。" }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}
 dotnet publish src\CCNest.App\CCNest.App.csproj -c Release -r win-x64 --self-contained true `
     -p:PublishReadyToRun=true -p:DebugType=none -p:Version=$Version -o $publish
 if ($LASTEXITCODE -ne 0) { throw "发布失败" }
@@ -49,7 +60,7 @@ Write-Host "✓ 已发布到 $publish" -ForegroundColor Green
 $installerDir = Join-Path $root "artifacts\installer"
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 $zip = Join-Path $installerDir "CCNest-$Version-win-x64-portable.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
+if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path "$publish\*" -DestinationPath $zip -CompressionLevel Optimal
 Write-Host "✓ 便携版：$zip" -ForegroundColor Green
 
@@ -66,5 +77,19 @@ if ($Iscc) {
     if ($LASTEXITCODE -ne 0) { throw "安装程序生成失败" }
     Write-Host "✓ 安装程序已生成到 $installerDir" -ForegroundColor Green
 } else {
+    if ($RequireInstaller) { throw "发布要求安装包，但未找到 Inno Setup (ISCC.exe)。" }
     Write-Warning "未找到 Inno Setup (ISCC.exe)，仅生成了便携版 zip。"
 }
+
+$packages = @($zip)
+$setup = Join-Path $installerDir "CCNest-Setup-$Version-x64.exe"
+if ($Iscc) {
+    if (-not (Test-Path -LiteralPath $setup)) { throw "未找到本次生成的安装包：$setup" }
+    $packages += $setup
+}
+$checksumFile = Join-Path $installerDir "SHA256SUMS.txt"
+$lines = $packages | ForEach-Object {
+    "{0}  {1}" -f (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path -Leaf $_)
+}
+[IO.File]::WriteAllLines($checksumFile, [string[]]$lines, [Text.UTF8Encoding]::new($false))
+Write-Host "✓ 校验文件：$checksumFile" -ForegroundColor Green

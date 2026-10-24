@@ -26,5 +26,11 @@ try {
     Write-Host "✓ mihomo $version 已下载并通过校验" -ForegroundColor Green
 }
 finally {
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    $resolved = [IO.Path]::GetFullPath($tmp)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Leaf $resolved) -notmatch '^ccnest-mihomo-[0-9a-f]{32}$') {
+        throw "临时目录校验失败，拒绝递归清理。"
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
 }

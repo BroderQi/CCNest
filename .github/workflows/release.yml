@@ -1,0 +1,148 @@
+name: Release Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-windows
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check version and existing release
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [xml]$props = Get-Content -LiteralPath Directory.Build.props -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must have the form 1.0.1.' }
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match Directory.Build.props ($tag)."
+          }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          $existing = $null
+          try {
+            $existing = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" -Headers $headers
+          } catch {
+            if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
+          }
+          $needed = $null -eq $existing -or $existing.draft
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "needed=$($needed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $needed) {
+            "### $tag is already published`nBump Version in Directory.Build.props to publish a new release." >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Install .NET SDK
+        if: steps.version.outputs.needed == 'true'
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+          dotnet-version: 9.0.x
+
+      - name: Fetch and verify pinned mihomo
+        if: steps.version.outputs.needed == 'true'
+        run: ./scripts/fetch-mihomo.ps1
+
+      - name: Run tests including real proxy core
+        if: steps.version.outputs.needed == 'true'
+        run: |
+          dotnet test tests/CCNest.Tests/CCNest.Tests.csproj -c Release --logger trx --results-directory artifacts/test-results
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed; release will not be published.' }
+
+      - name: Locate installer compiler
+        if: steps.version.outputs.needed == 'true'
+        id: inno
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --version=6.7.3 --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'ISCC.exe was not found.' }
+          "path=$iscc" >> $env:GITHUB_OUTPUT
+
+      - name: Package portable ZIP, installer and SHA-256 checksums
+        if: steps.version.outputs.needed == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          ISCC_PATH: ${{ steps.inno.outputs.path }}
+        run: ./scripts/build.ps1 -Version $env:RELEASE_VERSION -SkipTests -Iscc $env:ISCC_PATH -RequireInstaller
+
+      - name: Stage assets and publish release
+        if: steps.version.outputs.needed == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $tag = $env:RELEASE_TAG
+          $files = @(
+            "artifacts/installer/CCNest-$version-win-x64-portable.zip",
+            "artifacts/installer/CCNest-Setup-$version-x64.exe",
+            'artifacts/installer/SHA256SUMS.txt'
+          )
+          foreach ($file in $files) { if (-not (Test-Path -LiteralPath $file)) { throw "Missing $file" } }
+          $notes = @"
+          ## 下载
+          - **便携版**：下载 portable.zip，解压后运行 CCNest.exe。
+          - **安装版**：下载 Setup.exe，按向导安装。
+          - 支持 Windows 10 / 11 x64，已包含 .NET 运行时。
+
+          客户端顶部“使用文档”提供五步配置说明。升级保留原有设置、加密凭据和专属浏览器资料。
+
+          构建提交：$env:GITHUB_SHA
+          包内含已校验的 mihomo 内核；SHA256SUMS.txt 可用于核对下载完整性。
+          "@
+          $notesFile = Join-Path $env:RUNNER_TEMP 'ccnest-release-notes.md'
+          [IO.File]::WriteAllText($notesFile, $notes, [Text.UTF8Encoding]::new($false))
+          gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft > $null 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --draft --title "CCNest $version" --generate-notes --notes-file $notesFile
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release.' }
+          } else {
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --notes-file $notesFile
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update draft release.' }
+          }
+          gh release upload $tag @files --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; release remains a draft.' }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release.' }
+          "### Published $tag`nhttps://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Keep test results on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: test-results
+          path: artifacts/test-results
+          if-no-files-found: ignore
