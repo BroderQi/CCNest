@@ -280,10 +280,14 @@
                     <StackPanel>
                         <TextBlock Text="出口 IP 质量检测" Style="{StaticResource CardTitle}" FontSize="16" />
                         <TextBlock Text="{Binding QualityIpText}" Style="{StaticResource Body}" Margin="0,6,0,0" />
-                        <TextBlock Text="打开 Scamalytics 对应 IP 的网页，查看 Fraud Score 和风险标签，无需填写 API Key。"
-                                   Style="{StaticResource Caption}" Margin="0,4,0,0" />
-                        <ui:Button Content="查看出口 IP 质量（Scamalytics）" Icon="{ui:SymbolIcon Open24}"
-                                   Command="{Binding CheckExitQualityCommand}" Margin="0,12,0,0" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" LineHeight="19"
+                                   Text="ip.net.coffee：检测打开它的浏览器所用出口的 Claude 风险（信任分、住宅 / 机房、DNS 与 WebRTC 泄漏），需先激活环境，会在专属浏览器中打开。Scamalytics：按实测出口 IP 查看 Fraud Score 和风险标签。均无需 API Key。" />
+                        <WrapPanel Margin="0,12,0,0">
+                            <ui:Button Content="Claude 风险检测（ip.net.coffee）" Icon="{ui:SymbolIcon Open24}"
+                                       Command="{Binding CheckClaudeRiskCommand}" Margin="0,0,8,8" />
+                            <ui:Button Content="查看出口 IP 质量（Scamalytics）" Icon="{ui:SymbolIcon Open24}"
+                                       Command="{Binding CheckExitQualityCommand}" Margin="0,0,8,8" />
+                        </WrapPanel>
                         <TextBlock Text="{Binding QualityStatus}" Style="{StaticResource Caption}" Margin="0,6,0,0"
                                    Visibility="{Binding QualityStatus, Converter={StaticResource NullToCollapsed}}" />
                     </StackPanel>

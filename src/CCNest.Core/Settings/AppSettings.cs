@@ -69,6 +69,7 @@ public sealed class AppSettings
     public MonitorSettings Monitor { get; set; } = new();
     public UiSettings Ui { get; set; } = new();
     public AdvancedSettings Advanced { get; set; } = new();
+    public UpdateSettings Updates { get; set; } = new();
 }
 
 public sealed class FirstStageSettings
@@ -187,5 +188,21 @@ public sealed class AdvancedSettings
 {
     public int MixedPort { get; set; } = 17897;
     public string? MihomoPathOverride { get; set; }
+
+    /// <summary>Release feed override. Empty = the official GitHub releases of BroderQi/CCNest.</summary>
     public string UpdateFeedUrl { get; set; } = "";
+}
+
+public sealed class UpdateSettings
+{
+    /// <summary>Check GitHub for a new release at start-up and twice a day while running.</summary>
+    public bool AutoCheck { get; set; } = true;
+
+    /// <summary>A version the user chose to skip: automatic checks stay quiet about it.</summary>
+    public string? SkippedVersion { get; set; }
+
+    public DateTime? LastCheckUtc { get; set; }
+
+    /// <summary>Version that ran last time, used to confirm a finished update.</summary>
+    public string? LastRunVersion { get; set; }
 }

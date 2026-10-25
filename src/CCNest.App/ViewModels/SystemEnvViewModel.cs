@@ -83,7 +83,21 @@ public sealed partial class SystemEnvViewModel : PageViewModel
         if (SelectedTimeZone != null) s.SystemEnv.TimeZoneId = SelectedTimeZone.Id;
     });
 
-    partial void OnApplyWithSessionChanged(bool value) => SaveSelection();
+    private static readonly HashSet<string> SelectionProperties = new()
+    {
+        nameof(ApplyWithSession), nameof(RegionalFormat), nameof(RegionalLocale), nameof(HomeLocation), nameof(SelectedGeo),
+        nameof(LanguageList), nameof(PreferredLanguage), nameof(DisplayLanguage), nameof(TimeZone), nameof(SelectedTimeZone),
+    };
+
+    /// <summary>
+    /// Every selection is saved immediately: with "随 Claude 环境自动应用" on, activation reads the saved
+    /// selection, so an unsaved checkbox would otherwise silently apply the previous choice.
+    /// </summary>
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName != null && SelectionProperties.Contains(e.PropertyName)) SaveSelection();
+    }
 
     [RelayCommand]
     private Task ApplyNowAsync() => RunBusyAsync("正在准备更改…", async () =>

@@ -126,14 +126,38 @@ public sealed partial class NetworkViewModel : PageViewModel
     }
     public bool CanCheckExitQuality => QualityExitIp != null && !IsBusy;
     public string QualityIpText => QualityExitIp is { } ip ? $"实测出口 IP：{ip}"
-        : "先测试当前线路，取得实测出口 IP 后再查看质量。";
+        : "先测试当前线路，取得实测出口 IP 后再查看 Scamalytics；ip.net.coffee 需在环境激活后使用。";
 
     private void RefreshQualityState()
     {
         OnPropertyChanged(nameof(QualityExitIp));
         OnPropertyChanged(nameof(CanCheckExitQuality));
         OnPropertyChanged(nameof(QualityIpText));
+        OnPropertyChanged(nameof(CanCheckClaudeRisk));
         CheckExitQualityCommand.NotifyCanExecuteChanged();
+        CheckClaudeRiskCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// ip.net.coffee/claude checks the IP of the browser that opens it (no IP parameter), so it is only
+    /// meaningful in the dedicated browser while the protected route is up and the gate is open.
+    /// </summary>
+    public bool CanCheckClaudeRisk => SessionActive && Services.Session.Status.State == SessionState.Protected
+                                      && Services.Session.Status.GateOpen && Services.Session.MixedPort != null && !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanCheckClaudeRisk))]
+    private void CheckClaudeRisk()
+    {
+        if (Services.Session.MixedPort is not { } port) return;
+        const string url = "https://ip.net.coffee/claude/";
+        try
+        {
+            var error = Core.Browser.DedicatedBrowser.Launch(Services.Settings.Current.Browser, port, url);
+            QualityStatus = error != null
+                ? "无法打开 ip.net.coffee：" + error
+                : "已在专属浏览器中打开 ip.net.coffee，请在网页查看信任分、IP 类型以及 DNS / WebRTC 泄漏检测结果。";
+        }
+        catch (Exception ex) { QualityStatus = "无法打开 ip.net.coffee：" + ex.Message; }
     }
 
     private void InvalidateQualityRoute()
@@ -183,7 +207,7 @@ public sealed partial class NetworkViewModel : PageViewModel
             or nameof(ValidationError) or nameof(Clash) or nameof(ClashSummary) or nameof(ClashFound) or nameof(PasteText) or nameof(ImportedNodeSummary)
             or nameof(SelectedConfigNode) or nameof(ImportYaml) or nameof(ManualText) or nameof(SessionActive) or nameof(TestActionText)
             or nameof(TestDescription) or nameof(EndpointWarning) or nameof(QualityStatus) or nameof(QualityExitIp)
-            or nameof(CanCheckExitQuality) or nameof(QualityIpText)) return;
+            or nameof(CanCheckExitQuality) or nameof(QualityIpText) or nameof(CanCheckClaudeRisk)) return;
         // A measured exit belongs to the route that was tested. Editing the expected IP alone
         // doesn't change that route; changing any other configuration invalidates the old lookup.
         if (e.PropertyName != nameof(ExpectedIp))

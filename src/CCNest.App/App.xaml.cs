@@ -75,6 +75,10 @@ public partial class App : Application
 
     public bool IsExiting => _exiting;
 
+    public bool IsMainWindowVisible => _window is { IsVisible: true } w && w.WindowState != WindowState.Minimized;
+
+    public void ShowBalloon(string title, string message) => _tray?.ShowBalloon(title, message);
+
     /// <summary>Exits CCNest. With <paramref name="restore"/>, an active session is ended and all settings restored first.</summary>
     public async Task ExitAsync(bool restore)
     {

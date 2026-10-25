@@ -9,16 +9,28 @@
             <TextBlock Style="{StaticResource PageTitle}" Text="{Binding Title}" />
             <TextBlock Style="{StaticResource PageSubtitle}" Text="{Binding Subtitle}" />
 
-            <!-- First-run guidance -->
+            <!-- Setup readiness: lists exactly what still blocks activation -->
             <Border Style="{StaticResource Surface}" Background="{StaticResource BrandSoftBrush}" BorderBrush="{StaticResource BrandBrush}"
-                    Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}">
+                    Visibility="{Binding ShowSetupBanner, Converter={StaticResource BoolToVisibility}}">
                 <DockPanel>
-                    <ui:Button DockPanel.Dock="Right" Appearance="Primary" Content="去配置网络线路" Icon="{ui:SymbolIcon ArrowRight24}"
+                    <ui:Button DockPanel.Dock="Right" Appearance="Primary" Content="去网络线路" Icon="{ui:SymbolIcon ArrowRight24}"
                                Command="{Binding GoCommand}" CommandParameter="network" VerticalAlignment="Center" />
                     <StackPanel Margin="0,0,16,0">
-                        <TextBlock Text="第一步：配置你的二级静态代理" Style="{StaticResource CardTitle}" />
-                        <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0"
-                                   Text="CCNest 会自动识别正在运行的 Clash / Mihomo 作为一级线路。填写服务商提供的静态代理并通过逐级测试后，即可在这里一键激活。" />
+                        <TextBlock Text="{Binding SetupTitle}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{Binding SetupMissing}" Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Windows settings applied separately are still changed after the session ended -->
+            <Border Style="{StaticResource Surface}" Background="{StaticResource WarnSoftBrush}" BorderBrush="{StaticResource WarnBrush}"
+                    Visibility="{Binding ShowStandaloneBanner, Converter={StaticResource BoolToVisibility}}">
+                <DockPanel>
+                    <ui:Button DockPanel.Dock="Right" Appearance="Primary" Content="恢复这些设置" Icon="{ui:SymbolIcon ArrowUndo24}"
+                               Command="{Binding RestoreStandaloneCommand}" VerticalAlignment="Center" />
+                    <StackPanel Margin="0,0,16,0">
+                        <TextBlock Text="Windows 设置尚未恢复" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{Binding StandaloneText}" Style="{StaticResource Caption}" Margin="0,4,0,0" />
                     </StackPanel>
                 </DockPanel>
             </Border>

@@ -12,11 +12,13 @@ public sealed class AppServices
         Settings = new SettingsStore();
         Session = new SessionManager(Settings);
         Dialogs = new DialogService();
+        Updates = new UpdateController(this);
     }
 
     public SettingsStore Settings { get; }
     public SessionManager Session { get; }
     public DialogService Dialogs { get; }
+    public UpdateController Updates { get; }
 
     /// <summary>Most recent detection result (shared between pages).</summary>
     public ClashEnvironment? LastClash { get; set; }

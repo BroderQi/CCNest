@@ -13,6 +13,10 @@ public sealed record ChangePreview(string Title, string Detail, string Timing);
 public sealed class DialogService
 {
     private ContentDialogHost? _host;
+    private int _openDialogs;
+
+    /// <summary>True while a content dialog is shown (only one can be open at a time).</summary>
+    public bool IsDialogOpen => _openDialogs > 0;
     private readonly SnackbarService _snackbar = new() { DefaultTimeOut = TimeSpan.FromSeconds(5) };
 
     public void Attach(ContentDialogHost host, SnackbarPresenter presenter)
@@ -42,7 +46,15 @@ public sealed class DialogService
         };
         if (primary == null) dialog.IsPrimaryButtonEnabled = false;
         if (secondary == null) dialog.IsSecondaryButtonEnabled = false;
-        return await dialog.ShowAsync(CancellationToken.None);
+        _openDialogs++;
+        try
+        {
+            return await dialog.ShowAsync(CancellationToken.None);
+        }
+        finally
+        {
+            _openDialogs--;
+        }
     }
 
     public async Task<bool> ConfirmAsync(string title, string message, string confirm = "确定", string cancel = "取消",

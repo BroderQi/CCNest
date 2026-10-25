@@ -12,7 +12,7 @@ public sealed partial class GuideViewModel : PageViewModel
 
     public override string Key => "guide";
     public override string Title => "使用文档";
-    public override string Subtitle => "按这五步完成配置。使用完毕，在“概览”结束环境并恢复设置。";
+    public override string Subtitle => "按这五步完成配置。使用完毕，在“概览”结束环境并恢复网络设置；单独应用的 Windows 设置按需恢复。";
     public override SymbolRegular Icon => SymbolRegular.BookOpen24;
 
     public IReadOnlyList<GuideStep> Steps { get; } = new GuideStep[]
@@ -20,11 +20,12 @@ public sealed partial class GuideViewModel : PageViewModel
         new(1, "配置网络线路",
             "一级是你自己的上游线路：推荐连接已启动的 Clash / Mihomo 本地端口，也可导入节点或手动填写 HTTP / SOCKS5 代理；能直连二级时可不设一级。\n" +
             "二级使用自建 VPS 上的 HTTP / SOCKS5 代理，或服务商购买的静态家宽 / ISP 代理。VPS 出口通常是机房 IP，不等于住宅 IP。\n" +
-            "点击“保存并逐级测试”，通过后核对并设置期望出口 IP；可点“查看出口 IP 质量”在 Scamalytics 查看 Fraud Score。",
+            "点击“保存并逐级测试”，通过后核对并设置期望出口 IP；激活环境后，可点“Claude 风险检测”在 ip.net.coffee 查看信任分与泄漏检测，或点“查看出口 IP 质量”在 Scamalytics 查看 Fraud Score。",
             "network", "配置网络线路"),
         new(2, "修改系统环境",
             "建议勾选五项：区域格式、首选语言、时区、国家或地区、Windows 显示语言，选择与出口所在地一致的设置。\n" +
-            "点击“预览并立即应用”。显示语言需已安装对应语言包，并注销后生效；重新登录后再继续。",
+            "点击“预览并立即应用”。显示语言需已安装对应语言包，并注销后生效；重新登录后再继续。\n" +
+            "这样应用的设置会一直保持，结束环境时不会自动恢复；需要还原时，在“概览”或“恢复中心”点击恢复。",
             "system", "修改系统环境"),
         new(3, "检查环境",
             "先在“概览”激活 Claude 环境，再到“环境检测”点击“开始检测”，自动包含专属浏览器检测。\n" +

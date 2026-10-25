@@ -42,10 +42,6 @@
             <ui:TitleBar.Icon>
                 <ui:ImageIcon Source="pack://application:,,,/Assets/ccnest-64.png" />
             </ui:TitleBar.Icon>
-            <ui:TitleBar.TrailingContent>
-                <ui:Button Content="使用文档" Icon="{ui:SymbolIcon BookOpen24}" Appearance="Transparent"
-                           Command="{Binding OpenGuideCommand}" Margin="0,0,12,0" VerticalAlignment="Center" />
-            </ui:TitleBar.TrailingContent>
         </ui:TitleBar>
 
         <Grid Grid.Row="1">

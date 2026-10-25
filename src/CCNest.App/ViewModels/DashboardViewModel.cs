@@ -3,9 +3,11 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CCNest.App.Services;
 using CCNest.Core.Claude;
+using CCNest.Core.Infrastructure;
 using CCNest.Core.Proxy;
 using CCNest.Core.Session;
 using CCNest.Core.Settings;
+using CCNest.Core.SystemEnv;
 using Wpf.Ui.Controls;
 
 namespace CCNest.App.ViewModels;
@@ -37,8 +39,14 @@ public sealed partial class DashboardViewModel : PageViewModel
     public override SymbolRegular Icon => SymbolRegular.Home24;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsInactive), nameof(IsTransitioning), nameof(StateLabel), nameof(HasMismatch), nameof(SinceText), nameof(LatencyText), nameof(IntelText))]
+    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsInactive), nameof(IsTransitioning), nameof(StateLabel), nameof(HasMismatch), nameof(SinceText), nameof(LatencyText), nameof(IntelText), nameof(ShowStandaloneBanner), nameof(ShowSetupBanner))]
     private SessionStatusInfo _status;
+
+    partial void OnStatusChanged(SessionStatusInfo value)
+    {
+        // The session just ended: settings applied separately in 系统环境 are not part of it.
+        if (value.State == SessionState.Inactive) RefreshStandalone();
+    }
 
     public bool IsActive => Status.State is SessionState.Protected or SessionState.Blocked or SessionState.Degraded;
     public bool IsInactive => Status.State == SessionState.Inactive;
@@ -72,10 +80,64 @@ public sealed partial class DashboardViewModel : PageViewModel
     [ObservableProperty] private bool _isConfigured;
     [ObservableProperty] private bool _showSteps;
 
+    // ---- setup readiness (first-run card) ----
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSetupBanner))] private string? _setupMissing;
+    [ObservableProperty] private string _setupTitle = "";
+    public bool ShowSetupBanner => SetupMissing != null && IsInactive;
+
+    // ---- standalone system changes that survive the end of a session ----
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowStandaloneBanner), nameof(StandaloneText))] private int _standalonePendingCount;
+    public bool ShowStandaloneBanner => StandalonePendingCount > 0 && IsInactive;
+    public string StandaloneText =>
+        $"在“系统环境”中单独应用的 {StandalonePendingCount} 项 Windows 设置（区域、语言、时区等）不随会话结束恢复，目前仍保持修改。";
+
     public override Task OnNavigatedToAsync()
     {
         RefreshSummary();
+        RefreshStandalone();
         return Task.CompletedTask;
+    }
+
+    private void RefreshStandalone()
+    {
+        try { StandalonePendingCount = JournalStore.LoadSystemEnv().Changes.Count(c => c.NeedsRestore); }
+        catch { StandalonePendingCount = 0; }
+    }
+
+    /// <summary>Lists what still blocks activation, so the user finds out here instead of from a failed activation.</summary>
+    private void RefreshSetup(AppSettings s)
+    {
+        var missing = new List<string>();
+        if (!IsConfigured) missing.Add("填写二级静态代理");
+        else if (s.SecondStage.Endpoint.HasCredentials && !SecretStore.Has(SecretStore.SecondStagePassword)) missing.Add("重新输入二级代理密码");
+        if (s.Protection.RequireExpectedIp && string.IsNullOrWhiteSpace(s.SecondStage.ExpectedExitIp)) missing.Add("测试线路并设置期望出口 IP");
+        SetupTitle = !IsConfigured ? "第一步：配置你的网络线路" : "激活前还差一步";
+        SetupMissing = missing.Count == 0 ? null
+            : "需要完成：" + string.Join("、", missing) + "。" +
+              (!IsConfigured ? "CCNest 会自动识别正在运行的 Clash / Mihomo 作为一级线路；在“网络线路”点击“保存并逐级测试”，通过后即可一键填入期望出口 IP。"
+                             : "在“网络线路”点击“保存并逐级测试”，通过后可一键填入期望出口 IP。");
+    }
+
+    [RelayCommand]
+    private async Task RestoreStandaloneAsync()
+    {
+        var journal = JournalStore.LoadSystemEnv();
+        var pending = journal.Changes.Where(c => c.NeedsRestore).ToList();
+        if (pending.Count == 0)
+        {
+            RefreshStandalone();
+            return;
+        }
+        var previews = pending.Select(c => new ChangePreview(c.Title, "恢复为：" + c.Describe.Split('→')[0].Trim(), SystemEnvService.Describe(c.RestoreTiming))).ToList();
+        if (!await Services.Dialogs.ConfirmChangesAsync("恢复 Windows 设置", "将恢复以下在“系统环境”中单独应用的设置：", previews, null, "恢复")) return;
+        var outcomes = await SystemEnvService.RestoreStandaloneAsync();
+        RefreshStandalone();
+        var failed = outcomes.Where(o => !o.Success).ToList();
+        if (failed.Count > 0)
+            await Services.Dialogs.ShowMessageAsync("部分设置未能恢复", string.Join("\n", failed.Select(o => $"• {o.Change.Title}：{o.Message}")) + "\n\n可在“恢复中心”查看详情。");
+        else
+            Services.Dialogs.ShowSuccessToast(outcomes.Any(o => o.Change.RestoreTiming == EffectTiming.SignOut)
+                ? "已恢复。显示语言需要注销后才会完全恢复。" : "Windows 设置已恢复");
     }
 
     private void RefreshSummary()
@@ -90,6 +152,7 @@ public sealed partial class DashboardViewModel : PageViewModel
         };
         IsConfigured = !string.IsNullOrWhiteSpace(s.SecondStage.Endpoint.Host);
         SecondStageText = IsConfigured ? $"{s.SecondStage.DisplayName} · {s.SecondStage.Endpoint}" : "尚未配置";
+        RefreshSetup(s);
         ExpectedIpText = s.SecondStage.ExpectedExitIp;
         ProtectionText = s.Protection.Level switch
         {
@@ -106,9 +169,9 @@ public sealed partial class DashboardViewModel : PageViewModel
     {
         if (Services.Session.Journal != null) return;
         var s = Services.Settings.Current;
-        if (!IsConfigured)
+        if (SetupMissing != null)
         {
-            await Services.Dialogs.ShowMessageAsync("尚未配置二级代理", "请先在“网络线路”页面填写你购买的静态代理信息并测试线路。");
+            await Services.Dialogs.ShowMessageAsync("还不能激活", SetupMissing);
             _main.Navigate("network");
             return;
         }
@@ -186,6 +249,7 @@ public sealed partial class DashboardViewModel : PageViewModel
         {
             Services.Dialogs.ShowSuccessToast("已结束会话，原始设置已恢复");
         }
+        RefreshStandalone();
     }
 
     [RelayCommand]

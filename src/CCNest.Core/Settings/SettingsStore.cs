@@ -61,5 +61,7 @@ public sealed class SettingsStore
         s.Monitor.ExitIpIntervalSeconds = Math.Clamp(s.Monitor.ExitIpIntervalSeconds, 30, 3600);
         s.Monitor.FailureThreshold = Math.Clamp(s.Monitor.FailureThreshold, 1, 10);
         if (s.Advanced.MixedPort is < 1024 or > 65535) s.Advanced.MixedPort = 17897;
+        s.Updates ??= new UpdateSettings();
+        s.Advanced.UpdateFeedUrl ??= "";
     }
 }

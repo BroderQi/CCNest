@@ -22,11 +22,12 @@ public sealed partial class MainViewModel : ObservableObject
         Pages = new ObservableCollection<PageViewModel>
         {
             Dashboard,
+            // Same order as the five steps in 使用文档.
             new NetworkViewModel(services),
-            new DiagnosticsViewModel(services),
-            new ClaudeAppsViewModel(services),
-            new BrowserViewModel(services),
             new SystemEnvViewModel(services),
+            new DiagnosticsViewModel(services),
+            new BrowserViewModel(services),
+            new ClaudeAppsViewModel(services),
             new RestoreCenterViewModel(services),
             new LogsViewModel(services),
         };
@@ -106,6 +107,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         await HandleArgumentsAsync(args, false);
+        _services.Updates.OnStartup(args);
         await Dashboard.OnNavigatedToAsync();
     }
 

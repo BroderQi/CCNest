@@ -111,3 +111,5 @@ CCNest 明确区分以下几个层次，并在界面“保护范围”中如实�
 ## 9. 数据与升级
 
 用户数据全部位于 `%LOCALAPPDATA%\CCNest`，与安装目录分离：升级 / 重装 / 卸载不会影响设置和专属浏览器资料。Chrome 与 Edge 的专属资料分别保存（两者格式不兼容）。“重置资料”是把目录移到 `archived-日期`，而不是删除。
+
+客户端更新（`CCNest.Core/Update/UpdateService.cs`）：读取 `https://api.github.com/repos/BroderQi/CCNest/releases/latest`，版本高于当前时提示更新。安装包或便携版先下载到 `%LOCALAPPDATA%\CCNest\updates`，必须与同一发布中的 `SHA256SUMS.txt` 一致才会使用。随后先结束会话并恢复全部原始设置（任何一项恢复失败即取消更新），再由一个标准用户权限的脚本等待 CCNest 退出：安装版静默运行安装包（由安装程序自己请求 UAC），便携版用 robocopy 覆盖程序文件，最后以 `--updated` / `--update-failed` 重新启动 CCNest。日志位于 `logs\update-*.log`。

@@ -99,7 +99,7 @@
             <Border Style="{StaticResource Surface}">
                 <StackPanel>
                     <ui:ToggleSwitch IsChecked="{Binding ApplyWithSession}" Content="随 Claude 环境自动应用：激活时应用所选设置，结束会话时自动恢复" />
-                    <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0" Text="关闭时，可以用下方按钮单独应用，并在“恢复中心”或这里随时恢复。" />
+                    <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0" Text="关闭时，可以用下方按钮单独应用。单独应用的设置不会在结束环境时自动恢复，需要时在“概览”、“恢复中心”或这里恢复。" />
                     <WrapPanel Margin="0,14,0,0">
                         <ui:Button Appearance="Primary" Content="预览并立即应用" Icon="{ui:SymbolIcon Checkmark24}" Command="{Binding ApplyNowCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="恢复原始设置" Icon="{ui:SymbolIcon ArrowUndo24}" Command="{Binding RestoreCommand}" Margin="0,0,8,8" />
